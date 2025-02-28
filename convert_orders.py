@@ -151,9 +151,6 @@ def convert_shopify_to_singpost(shopify_file, output_file):
                 # Only create SingPost entries for international non-US/CA orders
                 if region_name == "International":
                     # Process international orders for SingPost
-                    # Code for processing international orders...
-                    # (this part seems fine)
-                    
                     # Determine weight and declared value based on bundle
                     if is_bundle:
                         weight = 500
@@ -262,57 +259,6 @@ def convert_shopify_to_singpost(shopify_file, output_file):
         
         summary += "\nPRODUCT BREAKDOWN BY REGION:"
         
-        # Use corrected print_region_breakdown
-        def print_region_breakdown(region_name, product_counter, order_details):
-            output = f"\n\n{region_name}:"
-            if not product_counter:
-                return output + "\nNone"
-                
-            # Group products by material
-            cotton_products = {k: v for k, v in product_counter.items() if k.startswith('Cotton')}
-            tencel_products = {k: v for k, v in product_counter.items() if k.startswith('Tencel')}
-            unknown_products = {k: v for k, v in product_counter.items() if not (k.startswith('Cotton') or k.startswith('Tencel'))}
-            
-            total_pieces = 0
-            
-            # Print Cotton products
-            if cotton_products:
-                cotton_pieces = 0
-                output += "\n\nCotton Products:"
-                for product, count in sorted(cotton_products.items()):
-                    pieces = sum(detail['quantity'] for detail in order_details if detail['product_key'] == product)
-                    cotton_pieces += pieces
-                    output += f"\n{product.split(' - ')[1]}: {count} order{'s' if count > 1 else ''} ({pieces} pieces)"
-                output += f"\nTotal Cotton pieces: {cotton_pieces}"
-                total_pieces += cotton_pieces
-            
-            # Print Tencel products
-            if tencel_products:
-                tencel_pieces = 0
-                output += "\n\nTencel Products:"
-                for product, count in sorted(tencel_products.items()):
-                    pieces = sum(detail['quantity'] for detail in order_details if detail['product_key'] == product)
-                    tencel_pieces += pieces
-                    output += f"\n{product.split(' - ')[1]}: {count} order{'s' if count > 1 else ''} ({pieces} pieces)"
-                output += f"\nTotal Tencel pieces: {tencel_pieces}"
-                total_pieces += tencel_pieces
-            
-            # Print Unknown products if any
-            if unknown_products:
-                unknown_pieces = 0
-                output += "\n\nUnknown Products:"
-                for product, count in sorted(unknown_products.items()):
-                    pieces = sum(detail['quantity'] for detail in order_details if detail['product_key'] == product)
-                    unknown_pieces += pieces
-                    output += f"\n{product.split(' - ')[1]}: {count} order{'s' if count > 1 else ''} ({pieces} pieces)"
-                output += f"\nTotal Unknown pieces: {unknown_pieces}"
-                total_pieces += unknown_pieces
-            
-            output += f"\n\nTotal {region_name} orders: {len(order_details)}"
-            output += f"\nTotal {region_name} pieces: {total_pieces}"
-            
-            return output
-
         # Make sure we don't have any issues with the region breakdown
         try:
             summary += print_region_breakdown("SINGAPORE", sg_product_counter, sg_order_details)
@@ -366,13 +312,22 @@ def convert_shopify_to_singpost(shopify_file, output_file):
             credentials_path = os.environ.get('GOOGLE_CREDENTIALS_PATH')
             template_url = os.environ.get('SLIDES_TEMPLATE_URL')
             
-            if credentials_path:
-                template_id = get_template_id_from_url(template_url) if template_url else None
-                slides_url, pdf_path = create_shipping_slides(sg_order_details, credentials_path, template_id)
-        
-        # Add information about Google Slides
-        if slides_url:
-            summary += f"\n\nCreated Google Slides shipping labels for {len(sg_order_details)} Singapore orders"
+            if credentials_path and os.path.exists(credentials_path):
+                try:
+                    template_id = get_template_id_from_url(template_url) if template_url else None
+                    slides_url, pdf_path = create_shipping_slides(sg_order_details, credentials_path, template_id)
+                    
+                    # Add information about Google Slides
+                    if slides_url:
+                        summary += f"\n\nCreated Google Slides shipping labels for {len(sg_order_details)} Singapore orders"
+                except Exception as e:
+                    summary += f"\n\nError creating Google Slides: {str(e)}"
+                    print(f"Error creating Google Slides: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                summary += "\n\nSkipped Google Slides creation - credentials not found"
+                print(f"Skipped Google Slides - Credentials path not found or invalid: {credentials_path}")
         
         return summary, pdf_path, slides_url
         

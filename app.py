@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 # Add this line right after the set_page_config
-st.sidebar.caption("Version 1.2.3 - Updated Feb 28, 2025")  # Change the version number each time you update
+st.sidebar.caption("Version 1.3 - Updated Feb 28, 2025")  # Change the version number each time you update
 
 # Setup page
 st.title("Shopify to SingPost Converter")
@@ -110,9 +110,11 @@ with st.sidebar:
         st.session_state.google_credentials = None
         st.session_state.credentials_path = None
     
-    # Try to load credentials from secrets
-    credentials_from_secrets = False
-    if hasattr(st, 'secrets') and 'google_credentials' in st.secrets:
+# Try to load credentials from secrets
+credentials_from_secrets = False
+if hasattr(st, 'secrets'):
+    # Check for google_credentials first (standard key)
+    if 'google_credentials' in st.secrets:
         try:
             # Get the credentials from secrets
             credentials_json = st.secrets['google_credentials']
@@ -148,6 +150,45 @@ with st.sidebar:
             st.error(f"Error loading credentials from secrets: {str(e)}")
             st.code(traceback.format_exc())
             print(f"Error loading credentials from secrets: {e}")
+            print(traceback.format_exc())
+    
+    # If google_credentials not found, try gcp_service_account as fallback
+    elif 'gcp_service_account' in st.secrets:
+        try:
+            # Get the credentials from secrets
+            credentials_json = st.secrets['gcp_service_account']
+            
+            # Handle different formats of credentials
+            if isinstance(credentials_json, dict):
+                # If it's already a dict, convert to JSON string
+                credentials_content = json.dumps(credentials_json)
+            else:
+                # If it's a string, use it directly
+                credentials_content = credentials_json
+                # Validate it's proper JSON
+                json.loads(credentials_content)
+            
+            # Store in session state
+            st.session_state.google_credentials = credentials_content
+            
+            # Save to a file
+            credentials_path = "google_credentials.json"
+            with open(credentials_path, "w") as f:
+                f.write(credentials_content)
+            
+            # Update session state and environment variable
+            st.session_state.credentials_path = credentials_path
+            os.environ['GOOGLE_CREDENTIALS_PATH'] = credentials_path
+            
+            st.success("Google credentials loaded from Streamlit secrets (gcp_service_account)!")
+            credentials_from_secrets = True
+            
+            # Debug: Log to console
+            print("Successfully loaded Google credentials from gcp_service_account secrets!")
+        except Exception as e:
+            st.error(f"Error loading credentials from gcp_service_account: {str(e)}")
+            st.code(traceback.format_exc())
+            print(f"Error loading credentials from gcp_service_account: {e}")
             print(traceback.format_exc())
     
     # Only show upload if not loaded from secrets
