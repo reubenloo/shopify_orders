@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import json
 import traceback
+import re
 from convert_orders import convert_shopify_to_singpost
 
 def test_google_api_connection(credentials_path):
