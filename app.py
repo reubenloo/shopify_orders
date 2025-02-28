@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 # Add this line right after the set_page_config
-st.sidebar.caption("Version 1.3 - Updated Feb 28, 2025")  # Change the version number each time you update
+st.sidebar.caption("Version 1.4 - Updated Feb 28, 2025")  # Change the version number each time you update
 
 # Setup page
 st.title("Shopify to SingPost Converter")
@@ -113,29 +113,34 @@ with st.sidebar:
 # Try to load credentials from secrets
 credentials_from_secrets = False
 if hasattr(st, 'secrets'):
-    # Check for google_credentials first (standard key)
-    if 'google_credentials' in st.secrets:
+    # Check for gcp_service_account (the key shown in your error)
+    if 'gcp_service_account' in st.secrets:
         try:
-            # Get the credentials from secrets
-            credentials_json = st.secrets['google_credentials']
+            # Get the credentials directly from secrets
+            creds = st.secrets['gcp_service_account']
             
-            # Handle different formats of credentials
-            if isinstance(credentials_json, dict):
-                # If it's already a dict, convert to JSON string
-                credentials_content = json.dumps(credentials_json)
-            else:
-                # If it's a string, use it directly
-                credentials_content = credentials_json
-                # Validate it's proper JSON
-                json.loads(credentials_content)
-            
-            # Store in session state
-            st.session_state.google_credentials = credentials_content
-            
-            # Save to a file
+            # Create a credentials file manually without trying to serialize the AttrDict
             credentials_path = "google_credentials.json"
+            
             with open(credentials_path, "w") as f:
-                f.write(credentials_content)
+                # Write a JSON object manually with the required fields
+                f.write("{\n")
+                f.write(f'  "type": "{creds.get("type", "service_account")}",\n')
+                f.write(f'  "project_id": "{creds.get("project_id", "")}",\n')
+                f.write(f'  "private_key_id": "{creds.get("private_key_id", "")}",\n')
+                f.write(f'  "private_key": {json.dumps(creds.get("private_key", ""))},\n')
+                f.write(f'  "client_email": "{creds.get("client_email", "")}",\n')
+                f.write(f'  "client_id": "{creds.get("client_id", "")}",\n')
+                f.write(f'  "auth_uri": "{creds.get("auth_uri", "https://accounts.google.com/o/oauth2/auth")}",\n')
+                f.write(f'  "token_uri": "{creds.get("token_uri", "https://oauth2.googleapis.com/token")}",\n')
+                f.write(f'  "auth_provider_x509_cert_url": "{creds.get("auth_provider_x509_cert_url", "https://www.googleapis.com/oauth2/v1/certs")}",\n')
+                if "client_x509_cert_url" in creds:
+                    f.write(f'  "client_x509_cert_url": "{creds.get("client_x509_cert_url")}",\n')
+                if "universe_domain" in creds:
+                    f.write(f'  "universe_domain": "{creds.get("universe_domain", "googleapis.com")}"\n')
+                else:
+                    f.write(f'  "universe_domain": "googleapis.com"\n')
+                f.write("}")
             
             # Update session state and environment variable
             st.session_state.credentials_path = credentials_path
@@ -146,10 +151,19 @@ if hasattr(st, 'secrets'):
             
             # Debug: Log to console
             print("Successfully loaded Google credentials from secrets!")
+            
+            # Verify the file was created correctly
+            try:
+                with open(credentials_path, 'r') as f:
+                    print(f"First 50 chars of credentials file: {f.read(50)}...")
+                print(f"Credentials file size: {os.path.getsize(credentials_path)} bytes")
+            except Exception as e:
+                print(f"Error verifying credentials file: {e}")
+                
         except Exception as e:
-            st.error(f"Error loading credentials from secrets: {str(e)}")
+            st.error(f"Error loading credentials from gcp_service_account: {str(e)}")
             st.code(traceback.format_exc())
-            print(f"Error loading credentials from secrets: {e}")
+            print(f"Error loading credentials from gcp_service_account: {e}")
             print(traceback.format_exc())
     
     # If google_credentials not found, try gcp_service_account as fallback
