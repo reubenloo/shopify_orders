@@ -5,6 +5,318 @@ import json
 import traceback
 from convert_orders import convert_shopify_to_singpost
 
+def test_google_api_connection(credentials_path):
+    """
+    Test Google API connection with provided credentials
+    
+    Args:
+        credentials_path: Path to the service account JSON credentials file
+        
+    Returns:
+        dict: Status of different API connections
+    """
+    import traceback
+    results = {
+        "credentials_valid": False,
+        "drive_api_working": False,
+        "slides_api_working": False,
+        "account_email": None,
+        "errors": []
+    }
+    
+    try:
+        # Verify credentials file exists
+        if not os.path.exists(credentials_path):
+            results["errors"].append(f"Credentials file not found at {credentials_path}")
+            return results
+            
+        # Set up credentials
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+        
+        SCOPES = ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/presentations']
+        
+        try:
+            # Validate credentials format
+            try:
+                with open(credentials_path, 'r') as f:
+                    cred_content = f.read()
+                    import json
+                    cred_json = json.loads(cred_content)
+                    required_fields = ['type', 'project_id', 'private_key', 'client_email']
+                    missing_fields = [field for field in required_fields if field not in cred_json]
+                    if missing_fields:
+                        results["errors"].append(f"Credentials missing required fields: {missing_fields}")
+                    
+                    # Save account email for reference
+                    results["account_email"] = cred_json.get('client_email', 'Unknown')
+            except Exception as e:
+                results["errors"].append(f"Error reading credentials: {str(e)}")
+                return results
+                
+            # Create credentials
+            credentials = service_account.Credentials.from_service_account_file(
+                credentials_path, scopes=SCOPES)
+            
+            results["credentials_valid"] = True
+            results["account_email"] = credentials.service_account_email
+            
+            # Test Drive API
+            try:
+                drive_service = build('drive', 'v3', credentials=credentials)
+                # Make a simple API call to verify connection
+                files = drive_service.files().list(pageSize=1).execute()
+                results["drive_api_working"] = True
+            except Exception as e:
+                results["errors"].append(f"Drive API Error: {str(e)}")
+                
+            # Test Slides API
+            try:
+                slides_service = build('slides', 'v1', credentials=credentials)
+                # Create a blank presentation to test
+                presentation = {
+                    'title': f"API Test - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                }
+                slides_service.presentations().create(body=presentation).execute()
+                results["slides_api_working"] = True
+            except Exception as e:
+                results["errors"].append(f"Slides API Error: {str(e)}")
+                
+        except Exception as e:
+            results["errors"].append(f"Authentication Error: {str(e)}")
+            results["errors"].append(traceback.format_exc())
+            
+    except Exception as e:
+        results["errors"].append(f"General Error: {str(e)}")
+        results["errors"].append(traceback.format_exc())
+        
+    return results
+
+def test_create_slides(credentials_path, template_id=None):
+    """
+    Test creating a simple Google Slides presentation
+    
+    Args:
+        credentials_path: Path to the service account JSON credentials file
+        template_id: Optional ID of a template presentation to copy
+        
+    Returns:
+        dict: Results of the test
+    """
+    import traceback
+    results = {
+        "success": False,
+        "presentation_url": None,
+        "errors": [],
+        "steps_completed": []
+    }
+    
+    try:
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+        from datetime import datetime
+        import re
+        
+        # Verify credentials file
+        if not os.path.exists(credentials_path):
+            results["errors"].append(f"Credentials file not found at {credentials_path}")
+            return results
+            
+        results["steps_completed"].append("Verified credentials file exists")
+            
+        # Set up credentials
+        try:
+            SCOPES = ['https://www.googleapis.com/auth/presentations', 
+                     'https://www.googleapis.com/auth/drive']
+            
+            credentials = service_account.Credentials.from_service_account_file(
+                credentials_path, scopes=SCOPES)
+                
+            results["steps_completed"].append("Created credentials object")
+        except Exception as e:
+            results["errors"].append(f"Error creating credentials: {str(e)}")
+            results["errors"].append(traceback.format_exc())
+            return results
+            
+        # Create services
+        try:
+            slides_service = build('slides', 'v1', credentials=credentials)
+            drive_service = build('drive', 'v3', credentials=credentials)
+            results["steps_completed"].append("Built API services")
+        except Exception as e:
+            results["errors"].append(f"Error building services: {str(e)}")
+            results["errors"].append(traceback.format_exc())
+            return results
+            
+        # Create presentation
+        try:
+            presentation_id = None
+            
+            if template_id:
+                try:
+                    # Try to use template
+                    copy_title = f"Test Presentation - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                    drive_response = drive_service.files().copy(
+                        fileId=template_id,
+                        body={"name": copy_title}
+                    ).execute()
+                    presentation_id = drive_response.get('id')
+                    results["steps_completed"].append(f"Copied template: {template_id}")
+                except Exception as e:
+                    results["errors"].append(f"Error copying template: {str(e)}")
+                    # Don't return, fall back to creating new presentation
+            
+            if not presentation_id:
+                # Create new presentation
+                presentation = {
+                    'title': f"Test Presentation - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                }
+                presentation = slides_service.presentations().create(body=presentation).execute()
+                presentation_id = presentation.get('presentationId')
+                results["steps_completed"].append("Created new blank presentation")
+                
+            # Add a text slide
+            requests = [
+                {
+                    'createSlide': {
+                        'slideLayoutReference': {
+                            'predefinedLayout': 'TITLE_AND_BODY'
+                        },
+                        'placeholderIdMappings': []
+                    }
+                }
+            ]
+            
+            response = slides_service.presentations().batchUpdate(
+                presentationId=presentation_id,
+                body={'requests': requests}
+            ).execute()
+            
+            slide_id = response.get('replies', [{}])[0].get('createSlide', {}).get('objectId')
+            
+            results["steps_completed"].append("Added a slide to the presentation")
+            
+            # Get presentation URL
+            presentation_url = f"https://docs.google.com/presentation/d/{presentation_id}/edit"
+            results["presentation_url"] = presentation_url
+            results["steps_completed"].append("Generated presentation URL")
+            
+            results["success"] = True
+            
+        except Exception as e:
+            results["errors"].append(f"Error creating presentation: {str(e)}")
+            results["errors"].append(traceback.format_exc())
+            
+    except Exception as e:
+        results["errors"].append(f"General error: {str(e)}")
+        results["errors"].append(traceback.format_exc())
+        
+    return results
+
+# Add this under the "Debug Information" expander in your app.py file
+
+with st.expander("API Connection Tester"):
+    st.write("Test Google API connection with current credentials")
+    if st.button("Test Google API Connection"):
+        if 'credentials_path' in st.session_state and os.path.exists(st.session_state.credentials_path):
+            with st.spinner("Testing API connection..."):
+                # Import the test function at the top of your file if needed
+                results = test_google_api_connection(st.session_state.credentials_path)
+                
+                # Display results
+                if results["credentials_valid"]:
+                    st.success("✅ Credentials format is valid")
+                else:
+                    st.error("❌ Credentials format is invalid")
+                    
+                if results["drive_api_working"]:
+                    st.success("✅ Google Drive API is working")
+                else:
+                    st.error("❌ Google Drive API is not working")
+                    
+                if results["slides_api_working"]:
+                    st.success("✅ Google Slides API is working")
+                else:
+                    st.error("❌ Google Slides API is not working")
+                
+                st.markdown(f"**Service Account Email:** {results['account_email']}")
+                
+                if results["errors"]:
+                    st.error("Errors encountered:")
+                    for error in results["errors"]:
+                        st.code(error)
+                        
+                # Provide suggestions based on results
+                if not results["credentials_valid"]:
+                    st.info("💡 Check that your service account JSON file has the correct format")
+                    
+                if not results["drive_api_working"] or not results["slides_api_working"]:
+                    st.info("💡 Possible causes:")
+                    st.markdown("""
+                    - The Google Cloud project might not have the necessary APIs enabled
+                    - The service account might not have the required permissions
+                    - The private key might be incorrect
+                    """)
+                    st.markdown(f"""
+                    **Steps to fix:**
+                    1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+                    2. Make sure the Google Drive API and Google Slides API are enabled
+                    3. Check that the service account has the necessary permissions
+                    4. Try downloading a new service account JSON key
+                    """)
+        else:
+            st.error("No credentials file found. Please upload or load credentials first.")
+
+# Add this in the same expander as the API Connection Tester or create a new expander
+
+with st.expander("Google Slides Tester"):
+    st.write("Test creating a Google Slides presentation")
+    
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        use_template = st.checkbox("Use template", value=False)
+        if use_template:
+            template_url = st.text_input(
+                "Template URL", 
+                value=os.environ.get('SLIDES_TEMPLATE_URL', ''),
+                help="URL of a Google Slides template that has been shared with your service account"
+            )
+        else:
+            template_url = None
+    
+    with col2:
+        if st.button("Create Test Slides"):
+            if 'credentials_path' in st.session_state and os.path.exists(st.session_state.credentials_path):
+                with st.spinner("Creating test presentation..."):
+                    # Get template ID from URL if provided
+                    template_id = None
+                    if template_url:
+                        match = re.search(r'/d/([a-zA-Z0-9-_]+)', template_url)
+                        if match:
+                            template_id = match.group(1)
+                    
+                    # Run the test
+                    results = test_create_slides(st.session_state.credentials_path, template_id)
+                    
+                    # Display results
+                    if results["success"]:
+                        st.success("✅ Successfully created presentation!")
+                        st.markdown(f"[Open presentation]({results['presentation_url']})")
+                    else:
+                        st.error("❌ Failed to create presentation")
+                    
+                    st.subheader("Steps Completed")
+                    for i, step in enumerate(results["steps_completed"]):
+                        st.write(f"{i+1}. {step}")
+                    
+                    if results["errors"]:
+                        st.subheader("Errors")
+                        for error in results["errors"]:
+                            st.code(error)
+            else:
+                st.error("No credentials file found. Please upload or load credentials first.")
+
 st.set_page_config(
     page_title="Shopify to SingPost Converter",
     page_icon="📦",
@@ -12,7 +324,7 @@ st.set_page_config(
 )
 
 # Add this line right after the set_page_config
-st.sidebar.caption("Version 1.5 - Updated Feb 28, 2025")  # Change the version number each time you update
+st.sidebar.caption("Version 1.6 - Updated Feb 28, 2025")  # Change the version number each time you update
 
 # Setup page
 st.title("Shopify to SingPost Converter")
@@ -97,6 +409,60 @@ st.write("Upload your Shopify order export CSV to convert it to SingPost ezy2shi
 # Debug section - can be commented out in production
 with st.expander("Debug Information"):
     st.code(debug_secrets())
+    
+# Add this under the "Debug Information" expander in your app.py file
+
+with st.expander("API Connection Tester"):
+    st.write("Test Google API connection with current credentials")
+    if st.button("Test Google API Connection"):
+        if 'credentials_path' in st.session_state and os.path.exists(st.session_state.credentials_path):
+            with st.spinner("Testing API connection..."):
+                # Import the test function at the top of your file if needed
+                results = test_google_api_connection(st.session_state.credentials_path)
+                
+                # Display results
+                if results["credentials_valid"]:
+                    st.success("✅ Credentials format is valid")
+                else:
+                    st.error("❌ Credentials format is invalid")
+                    
+                if results["drive_api_working"]:
+                    st.success("✅ Google Drive API is working")
+                else:
+                    st.error("❌ Google Drive API is not working")
+                    
+                if results["slides_api_working"]:
+                    st.success("✅ Google Slides API is working")
+                else:
+                    st.error("❌ Google Slides API is not working")
+                
+                st.markdown(f"**Service Account Email:** {results['account_email']}")
+                
+                if results["errors"]:
+                    st.error("Errors encountered:")
+                    for error in results["errors"]:
+                        st.code(error)
+                        
+                # Provide suggestions based on results
+                if not results["credentials_valid"]:
+                    st.info("💡 Check that your service account JSON file has the correct format")
+                    
+                if not results["drive_api_working"] or not results["slides_api_working"]:
+                    st.info("💡 Possible causes:")
+                    st.markdown("""
+                    - The Google Cloud project might not have the necessary APIs enabled
+                    - The service account might not have the required permissions
+                    - The private key might be incorrect
+                    """)
+                    st.markdown(f"""
+                    **Steps to fix:**
+                    1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+                    2. Make sure the Google Drive API and Google Slides API are enabled
+                    3. Check that the service account has the necessary permissions
+                    4. Try downloading a new service account JSON key
+                    """)
+        else:
+            st.error("No credentials file found. Please upload or load credentials first.")
 
 # Sidebar for configuration
 with st.sidebar:
