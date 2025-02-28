@@ -1,6 +1,7 @@
 import pandas as pd
 import os
 from collections import Counter, defaultdict
+from google_slides import create_shipping_slides, get_template_id_from_url
 
 def safe_str_slice(value, length):
     """Safely convert value to string and slice it, handling NaN values"""
@@ -94,7 +95,7 @@ def parse_product_details(lineitem_name):
 def convert_shopify_to_singpost(shopify_file, output_file):
     # Check if input file exists
     if not os.path.exists(shopify_file):
-        return f"Error: Input file '{shopify_file}' not found. Please check the file path."
+        return f"Error: Input file '{shopify_file}' not found. Please check the file path.", None, None
     
     # Read and clean Shopify orders
     df = pd.read_csv(shopify_file)
@@ -137,8 +138,12 @@ def convert_shopify_to_singpost(shopify_file, output_file):
                 'material': material,
                 'is_bundle': is_bundle,
                 'product_key': product_key,
-                'order_number': row['Name'],  # Add order number for reference
-                'quantity': 2 if is_bundle else 1
+                'order_number': row['Name'].replace('#', ''),  # Add order number for reference
+                'quantity': 2 if is_bundle else 1,
+                'address1': safe_str_slice(row['Shipping Address1'], 35),
+                'address2': safe_str_slice(row['Shipping Address2'], 35) if pd.notna(row['Shipping Address2']) else '',
+                'postal': safe_str_slice(str(row['Shipping Zip']), 10).replace("'", ""),
+                'phone': safe_str_slice(row['Shipping Phone'], 20) if pd.notna(row['Shipping Phone']) else ''
             }
             details.append(detail)
             
@@ -232,6 +237,19 @@ def convert_shopify_to_singpost(shopify_file, output_file):
                 
                 singpost_data.append(singpost_row)
 
+    # Create Google Slides with shipping labels for Singapore orders
+    slides_url = None
+    pdf_path = None
+    
+    if sg_order_details:
+        # Check if Google Credentials and Template URL are set
+        credentials_path = os.environ.get('GOOGLE_CREDENTIALS_PATH')
+        template_url = os.environ.get('SLIDES_TEMPLATE_URL')
+        
+        if credentials_path:
+            template_id = get_template_id_from_url(template_url) if template_url else None
+            slides_url, pdf_path = create_shipping_slides(sg_order_details, credentials_path, template_id)
+    
     # Create summary message
     summary = "ORDER DETAILS BY REGION:\n"
     
@@ -252,102 +270,52 @@ def convert_shopify_to_singpost(shopify_file, output_file):
     
     summary += "\nPRODUCT BREAKDOWN BY REGION:"
     
-    # Function to print product breakdown for a region
-    def print_region_breakdown(region_name, product_counter, order_details):
-        output = f"\n\n{region_name}:"
-        if not product_counter:
-            return output + "\nNone"
-            
-        # Group products by material
-        cotton_products = {k: v for k, v in product_counter.items() if k.startswith('Cotton')}
-        tencel_products = {k: v for k, v in product_counter.items() if k.startswith('Tencel')}
-        unknown_products = {k: v for k, v in product_counter.items() if not (k.startswith('Cotton') or k.startswith('Tencel'))}
+def print_region_breakdown(region_name, product_counter, order_details):
+    output = f"\n\n{region_name}:"
+    if not product_counter:
+        return output + "\nNone"
         
-        total_pieces = 0
-        
-        # Print Cotton products
-        if cotton_products:
-            cotton_pieces = 0
-            output += "\n\nCotton Products:"
-            for product, count in sorted(cotton_products.items()):
-                pieces = sum(detail['quantity'] for detail in order_details if detail['product_key'] == product)
-                cotton_pieces += pieces
-                output += f"\n{product.split(' - ')[1]}: {count} order{'s' if count > 1 else ''} ({pieces} pieces)"
-            output += f"\nTotal Cotton pieces: {cotton_pieces}"
-            total_pieces += cotton_pieces
-        
-        # Print Tencel products
-        if tencel_products:
-            tencel_pieces = 0
-            output += "\n\nTencel Products:"
-            for product, count in sorted(tencel_products.items()):
-                pieces = sum(detail['quantity'] for detail in order_details if detail['product_key'] == product)
-                tencel_pieces += pieces
-                output += f"\n{product.split(' - ')[1]}: {count} order{'s' if count > 1 else ''} ({pieces} pieces)"
-            output += f"\nTotal Tencel pieces: {tencel_pieces}"
-            total_pieces += tencel_pieces
-        
-        # Print Unknown products if any
-        if unknown_products:
-            unknown_pieces = 0
-            output += "\n\nUnknown Products:"
-            for product, count in sorted(unknown_products.items()):
-                pieces = sum(detail['quantity'] for detail in order_details if detail['product_key'] == product)
-                unknown_pieces += pieces
-                output += f"\n{product.split(' - ')[1]}: {count} order{'s' if count > 1 else ''} ({pieces} pieces)"
-            output += f"\nTotal Unknown pieces: {unknown_pieces}"
-            total_pieces += unknown_pieces
-        
-        output += f"\n\nTotal {region_name} orders: {len(order_details)}"
-        output += f"\nTotal {region_name} pieces: {total_pieces}"
-        return output
+    # Group products by material
+    cotton_products = {k: v for k, v in product_counter.items() if k.startswith('Cotton')}
+    tencel_products = {k: v for k, v in product_counter.items() if k.startswith('Tencel')}
+    unknown_products = {k: v for k, v in product_counter.items() if not (k.startswith('Cotton') or k.startswith('Tencel'))}
     
-    summary += print_region_breakdown("SINGAPORE", sg_product_counter, sg_order_details)
-    summary += print_region_breakdown("US/CANADA", us_ca_product_counter, us_ca_order_details)
-    summary += print_region_breakdown("INTERNATIONAL", intl_product_counter, intl_order_details)
+    total_pieces = 0
     
-    # Calculate grand totals
-    total_orders = len(sg_order_details) + len(us_ca_order_details) + len(intl_order_details)
-    total_pieces = (
-        sum(detail['quantity'] for detail in sg_order_details) +
-        sum(detail['quantity'] for detail in us_ca_order_details) +
-        sum(detail['quantity'] for detail in intl_order_details)
-    )
+    # Print Cotton products
+    if cotton_products:
+        cotton_pieces = 0
+        output += "\n\nCotton Products:"
+        for product, count in sorted(cotton_products.items()):
+            pieces = sum(detail['quantity'] for detail in order_details if detail['product_key'] == product)
+            cotton_pieces += pieces
+            output += f"\n{product.split(' - ')[1]}: {count} order{'s' if count > 1 else ''} ({pieces} pieces)"
+        output += f"\nTotal Cotton pieces: {cotton_pieces}"
+        total_pieces += cotton_pieces
     
-    summary += f"\n\nGRAND TOTAL:"
-    summary += f"\nTotal orders: {total_orders}"
-    summary += f"\nTotal pieces: {total_pieces}"
+    # Print Tencel products
+    if tencel_products:
+        tencel_pieces = 0
+        output += "\n\nTencel Products:"
+        for product, count in sorted(tencel_products.items()):
+            pieces = sum(detail['quantity'] for detail in order_details if detail['product_key'] == product)
+            tencel_pieces += pieces
+            output += f"\n{product.split(' - ')[1]}: {count} order{'s' if count > 1 else ''} ({pieces} pieces)"
+        output += f"\nTotal Tencel pieces: {tencel_pieces}"
+        total_pieces += tencel_pieces
     
-    # Only create the SingPost CSV if there are international orders
-    if singpost_data:
-        # Convert to DataFrame and save
-        singpost_df = pd.DataFrame(singpost_data)
-        singpost_df.to_csv(output_file, 
-                        index=False,
-                        sep=',',
-                        quoting=1,
-                        quotechar='"',
-                        escapechar='\\',
-                        encoding='utf-8'
-        )
-        
-        # Validate required fields
-        required_columns = [col for col in singpost_df.columns if col.endswith('- *')]
-        for col in required_columns:
-            missing = singpost_df[col].isna().sum()
-            if missing > 0:
-                print(f"WARNING: {missing} rows have missing values in required field: {col}")
-        
-        summary += f"\n\nCreated SingPost file with {len(singpost_data)} international orders (excluding SG, US, CA)"
-    else:
-        summary += "\n\nNo international orders (excluding SG, US, CA) to export to SingPost"
+    # Print Unknown products if any
+    if unknown_products:
+        unknown_pieces = 0
+        output += "\n\nUnknown Products:"
+        for product, count in sorted(unknown_products.items()):
+            pieces = sum(detail['quantity'] for detail in order_details if detail['product_key'] == product)
+            unknown_pieces += pieces
+            output += f"\n{product.split(' - ')[1]}: {count} order{'s' if count > 1 else ''} ({pieces} pieces)"
+        output += f"\nTotal Unknown pieces: {unknown_pieces}"
+        total_pieces += unknown_pieces
     
-    return summary
-
-# Example usage
-if __name__ == "__main__":
-    result = convert_shopify_to_singpost(
-        'orders_export.csv',
-        'singpost_orders.csv'
-    )
-    print(result)
+    output += f"\n\nTotal {region_name} orders: {len(order_details)}"
+    output += f"\nTotal {region_name} pieces: {total_pieces}"
+    
+    return output
