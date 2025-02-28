@@ -6,6 +6,10 @@ import re
 import pytz
 
 def create_shipping_slides(order_details, credentials_path, template_id=None):
+    
+    # Add this at the beginning of create_shipping_slides in google_slides.py
+    print(f"Credentials path: {credentials_path}")
+    print(f"File exists: {os.path.exists(credentials_path)}")
     """
     Create or update a Google Slides presentation with shipping labels for orders
     
