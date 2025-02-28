@@ -24,12 +24,12 @@ if uploaded_file:
     if st.button("Convert to SingPost Format"):
         with st.spinner("Processing..."):
             # Run conversion
-            result = convert_shopify_to_singpost('orders_export.csv', 'singpost_orders.csv')
+            result, sg_labels_pdf = convert_shopify_to_singpost('orders_export.csv', 'singpost_orders.csv')
             
             # Display results
             st.success("Conversion completed!")
             
-            # Create tabs for summary and data preview
+            # Create tabs for summary, data preview, and shipping labels
             tab1, tab2 = st.tabs(["Summary", "Data Preview"])
             
             with tab1:
@@ -41,13 +41,28 @@ if uploaded_file:
                     st.dataframe(df)
             
             # Provide download links
-            if os.path.exists("singpost_orders.csv"):
-                with open("singpost_orders.csv", "rb") as file:
-                    st.download_button(
-                        label="Download SingPost CSV",
-                        data=file,
-                        file_name="singpost_orders.csv",
-                        mime="text/csv"
-                    )
-            else:
-                st.warning("No SingPost CSV was generated. There might be no international orders to process.")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if os.path.exists("singpost_orders.csv"):
+                    with open("singpost_orders.csv", "rb") as file:
+                        st.download_button(
+                            label="Download SingPost CSV",
+                            data=file,
+                            file_name="singpost_orders.csv",
+                            mime="text/csv"
+                        )
+                else:
+                    st.warning("No SingPost CSV was generated. There might be no international orders to process.")
+            
+            with col2:
+                if sg_labels_pdf and os.path.exists(sg_labels_pdf):
+                    with open(sg_labels_pdf, "rb") as file:
+                        st.download_button(
+                            label="Download Singapore Shipping Labels (PDF)",
+                            data=file,
+                            file_name=os.path.basename(sg_labels_pdf),
+                            mime="application/pdf"
+                        )
+                else:
+                    st.info("No Singapore orders to generate shipping labels.")
