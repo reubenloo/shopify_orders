@@ -11,6 +11,13 @@ st.set_page_config(
     layout="wide"
 )
 
+# Add this line right after the set_page_config
+st.sidebar.caption("Version 1.2.3 - Updated Feb 28, 2025")  # Change the version number each time you update
+
+# Setup page
+st.title("Shopify to SingPost Converter")
+st.write("Upload your Shopify order export CSV to convert it to SingPost ezy2ship format")
+
 # Debug function for secrets
 def debug_secrets():
     debug_info = []
