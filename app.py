@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
 import os
-from convert_orders import convert_shopify_to_singpost
 import json
+from convert_orders import convert_shopify_to_singpost
 
 st.set_page_config(
     page_title="Shopify to SingPost Converter",
@@ -21,24 +21,24 @@ with st.sidebar:
     # Google Slides Configuration
     st.subheader("Google Slides Integration")
     
-    # Check if credentials exist in session state
+    # Check if credentials exist in session state or in secrets
     if 'google_credentials' not in st.session_state:
         st.session_state.google_credentials = None
         st.session_state.credentials_path = None
     
-    # Upload Google credentials
-    credentials_file = st.file_uploader(
-        "Upload Google service account credentials (JSON)", 
-        type=['json'],
-        help="Upload the service account JSON file from Google Cloud console"
-    )
-    
-    if credentials_file is not None:
-        # Save the credentials to a temporary file
-        credentials_content = credentials_file.getvalue().decode('utf-8')
+    # Check for credentials in secrets
+    credentials_from_secrets = False
+    if 'google_credentials' in st.secrets:
         try:
-            # Validate it's a proper JSON
-            json.loads(credentials_content)
+            # Validate the credentials from secrets
+            credentials_json = st.secrets['google_credentials']
+            if isinstance(credentials_json, dict):  # If it's already a dict
+                credentials_content = json.dumps(credentials_json)
+            else:  # If it's a string
+                credentials_content = credentials_json
+                # Validate it's proper JSON
+                json.loads(credentials_content)
+            
             st.session_state.google_credentials = credentials_content
             
             # Save to a file
@@ -49,19 +49,60 @@ with st.sidebar:
             st.session_state.credentials_path = credentials_path
             os.environ['GOOGLE_CREDENTIALS_PATH'] = credentials_path
             
-            st.success("Google credentials loaded successfully!")
-        except json.JSONDecodeError:
-            st.error("Invalid JSON file. Please upload a valid service account credentials file.")
+            st.success("Google credentials loaded from Streamlit secrets!")
+            credentials_from_secrets = True
+        except Exception as e:
+            st.error(f"Error loading credentials from secrets: {str(e)}")
     
-    # Template URL input
-    template_url = st.text_input(
-        "Google Slides Template URL (optional)",
-        help="URL of a Google Slides template that has been shared with your service account"
-    )
+    # Only show upload if not loaded from secrets
+    if not credentials_from_secrets:
+        # Upload Google credentials
+        credentials_file = st.file_uploader(
+            "Upload Google service account credentials (JSON)", 
+            type=['json'],
+            help="Upload the service account JSON file from Google Cloud console"
+        )
+        
+        if credentials_file is not None:
+            # Save the credentials to a temporary file
+            credentials_content = credentials_file.getvalue().decode('utf-8')
+            try:
+                # Validate it's a proper JSON
+                json.loads(credentials_content)
+                st.session_state.google_credentials = credentials_content
+                
+                # Save to a file
+                credentials_path = "google_credentials.json"
+                with open(credentials_path, "w") as f:
+                    f.write(credentials_content)
+                
+                st.session_state.credentials_path = credentials_path
+                os.environ['GOOGLE_CREDENTIALS_PATH'] = credentials_path
+                
+                st.success("Google credentials loaded successfully!")
+            except json.JSONDecodeError:
+                st.error("Invalid JSON file. Please upload a valid service account credentials file.")
     
-    if template_url and template_url.startswith("https://docs.google.com/presentation"):
-        os.environ['SLIDES_TEMPLATE_URL'] = template_url
-        st.success("Template URL saved!")
+    # Check for template URL in secrets
+    template_url_from_secrets = False
+    if 'google_slides_template' in st.secrets:
+        template_url = st.secrets['google_slides_template']
+        if template_url and template_url.startswith("https://docs.google.com/presentation"):
+            os.environ['SLIDES_TEMPLATE_URL'] = template_url
+            st.success("Template URL loaded from Streamlit secrets!")
+            template_url_from_secrets = True
+    
+    # Only show template URL input if not loaded from secrets
+    if not template_url_from_secrets:
+        # Template URL input
+        template_url = st.text_input(
+            "Google Slides Template URL (optional)",
+            help="URL of a Google Slides template that has been shared with your service account"
+        )
+        
+        if template_url and template_url.startswith("https://docs.google.com/presentation"):
+            os.environ['SLIDES_TEMPLATE_URL'] = template_url
+            st.success("Template URL saved!")
     
     st.divider()
     
