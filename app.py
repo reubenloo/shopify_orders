@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 # Add this line right after the set_page_config
-st.sidebar.caption("Version 1.4 - Updated Feb 28, 2025")  # Change the version number each time you update
+st.sidebar.caption("Version 1.5 - Updated Feb 28, 2025")  # Change the version number each time you update
 
 # Setup page
 st.title("Shopify to SingPost Converter")
@@ -291,81 +291,60 @@ if uploaded_file:
         f.write(uploaded_file.getvalue())
     
     # Add a button to run the conversion
-    if st.button("Convert to SingPost Format"):
-        with st.spinner("Processing orders..."):
-            # Debug: Check environment just before conversion
-            print(f"Before conversion - GOOGLE_CREDENTIALS_PATH in env: {'GOOGLE_CREDENTIALS_PATH' in os.environ}")
-            print(f"Before conversion - SLIDES_TEMPLATE_URL in env: {'SLIDES_TEMPLATE_URL' in os.environ}")
-            if 'GOOGLE_CREDENTIALS_PATH' in os.environ:
-                creds_file = os.environ['GOOGLE_CREDENTIALS_PATH']
-                print(f"Credentials file exists: {os.path.exists(creds_file)}")
+    # Add this code to improve debugging in the button click handler section:
+
+# Add a button to run the conversion
+if st.button("Convert to SingPost Format"):
+    with st.spinner("Processing orders..."):
+        # Debug: Check environment just before conversion
+        st.info("Starting conversion process...")
+        
+        debug_msg = []
+        debug_msg.append(f"GOOGLE_CREDENTIALS_PATH in env: {'GOOGLE_CREDENTIALS_PATH' in os.environ}")
+        if 'GOOGLE_CREDENTIALS_PATH' in os.environ:
+            creds_file = os.environ['GOOGLE_CREDENTIALS_PATH']
+            debug_msg.append(f"Credentials file path: {creds_file}")
+            debug_msg.append(f"Credentials file exists: {os.path.exists(creds_file)}")
+            if os.path.exists(creds_file):
+                debug_msg.append(f"Credentials file size: {os.path.getsize(creds_file)} bytes")
+                
+        debug_msg.append(f"SLIDES_TEMPLATE_URL in env: {'SLIDES_TEMPLATE_URL' in os.environ}")
+        if 'SLIDES_TEMPLATE_URL' in os.environ:
+            debug_msg.append(f"Template URL: {os.environ['SLIDES_TEMPLATE_URL']}")
             
-            # Run conversion
-            try:
-                result, pdf_path, slides_url = convert_shopify_to_singpost('orders_export.csv', 'singpost_orders.csv')
-                
-                # Debug: Print results
-                print(f"Conversion result - pdf_path: {pdf_path}, slides_url: {slides_url}")
-                
-                # Display results
-                st.success("Conversion completed!")
-                
-                # Create tabs for summary and data preview
-                tab1, tab2 = st.tabs(["Summary", "Data Preview"])
-                
-                with tab1:
-                    st.text_area("Conversion Summary", result, height=400)
-                
-                with tab2:
-                    if os.path.exists("singpost_orders.csv"):
-                        df = pd.read_csv("singpost_orders.csv")
-                        st.dataframe(df)
-                    else:
-                        st.info("No SingPost CSV was generated (no international orders)")
-                
-                # Download section
-                st.divider()
-                st.subheader("Download Results")
-                
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    if os.path.exists("singpost_orders.csv"):
-                        with open("singpost_orders.csv", "rb") as file:
-                            st.download_button(
-                                label="Download SingPost CSV",
-                                data=file,
-                                file_name="singpost_orders.csv",
-                                mime="text/csv"
-                            )
-                    else:
-                        st.info("No SingPost CSV generated")
-                
-                with col2:
-                    if pdf_path and os.path.exists(pdf_path):
-                        with open(pdf_path, "rb") as file:
-                            st.download_button(
-                                label="Download Shipping Labels PDF",
-                                data=file,
-                                file_name=os.path.basename(pdf_path),
-                                mime="application/pdf"
-                            )
-                    else:
-                        st.info("No PDF shipping labels generated")
-                
-                with col3:
-                    if slides_url:
-                        st.markdown(f"[Open Google Slides Shipping Labels]({slides_url})")
-                    else:
-                        if ('credentials_path' in st.session_state and 
-                            st.session_state.credentials_path and 
-                            os.path.exists(st.session_state.credentials_path)):
-                            st.warning("No Google Slides generated. Check service account permissions.")
-                        else:
-                            st.warning("Google credentials not found. Upload Google credentials to use Slides integration.")
-                            
-            except Exception as e:
-                st.error(f"Error processing orders: {str(e)}")
+        # Debug credentials in session state
+        debug_msg.append(f"google_credentials in session_state: {'google_credentials' in st.session_state}")
+        debug_msg.append(f"credentials_path in session_state: {'credentials_path' in st.session_state}")
+        if 'credentials_path' in st.session_state:
+            debug_msg.append(f"Session state path: {st.session_state.credentials_path}")
+            debug_msg.append(f"Path exists: {os.path.exists(st.session_state.credentials_path)}")
+            
+        # Log to console
+        print("\n".join(debug_msg))
+        
+        # Create an expander for debugging info
+        with st.expander("Pre-Conversion Debug Info"):
+            st.code("\n".join(debug_msg))
+        
+        # Run conversion
+        try:
+            result, pdf_path, slides_url = convert_shopify_to_singpost('orders_export.csv', 'singpost_orders.csv')
+            
+            # Debug: Print results
+            print(f"Conversion result - pdf_path: {pdf_path}, slides_url: {slides_url}")
+            
+            # Create an expander for post-conversion debugging
+            with st.expander("Post-Conversion Debug Info"):
+                st.code(f"PDF Path: {pdf_path}\nSlides URL: {slides_url}")
+            
+            # Display results
+            st.success("Conversion completed!")
+            
+            # Rest of the display logic...
+            
+        except Exception as e:
+            st.error(f"Error processing orders: {str(e)}")
+            with st.expander("Detailed Error Information"):
                 st.code(traceback.format_exc())
-                print(f"Conversion error: {e}")
-                print(traceback.format_exc())
+            print(f"Conversion error: {e}")
+            print(traceback.format_exc())
