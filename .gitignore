@@ -1,0 +1,24 @@
+# Credentials
+google_credentials.json
+*credentials*.json
+*.json
+
+# Generated files
+*.csv
+*.pdf
+shipping_labels/
+__pycache__/
+.venv/
+venv/
+
+# Environment files
+.env
+.env.local
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db

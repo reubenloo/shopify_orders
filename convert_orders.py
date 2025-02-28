@@ -1,7 +1,6 @@
 import pandas as pd
 import os
 from collections import Counter, defaultdict
-from sg_labels import generate_sg_shipping_labels
 
 def safe_str_slice(value, length):
     """Safely convert value to string and slice it, handling NaN values"""
@@ -95,7 +94,7 @@ def parse_product_details(lineitem_name):
 def convert_shopify_to_singpost(shopify_file, output_file):
     # Check if input file exists
     if not os.path.exists(shopify_file):
-        return f"Error: Input file '{shopify_file}' not found. Please check the file path.", None
+        return f"Error: Input file '{shopify_file}' not found. Please check the file path."
     
     # Read and clean Shopify orders
     df = pd.read_csv(shopify_file)
@@ -130,7 +129,7 @@ def convert_shopify_to_singpost(shopify_file, output_file):
             product_key = f"{material} - {size}"
             counter[product_key] += 1
             
-            # Store order details with more fields for Singapore orders
+            # Store order details
             detail = {
                 'name': safe_str_slice(row['Shipping Name'], 35),
                 'country': safe_str_slice(row['Shipping Country'], 2),
@@ -141,17 +140,6 @@ def convert_shopify_to_singpost(shopify_file, output_file):
                 'order_number': row['Name'],  # Add order number for reference
                 'quantity': 2 if is_bundle else 1
             }
-            
-            # Add shipping address details for Singapore orders
-            if region_name == "Singapore":
-                detail.update({
-                    'address1': safe_str_slice(row['Shipping Address1'], 50) if pd.notna(row['Shipping Address1']) else '',
-                    'address2': safe_str_slice(row['Shipping Address2'], 50) if pd.notna(row['Shipping Address2']) else '',
-                    'city': safe_str_slice(row['Shipping City'], 30) if pd.notna(row['Shipping City']) else '',
-                    'postal': safe_str_slice(str(row['Shipping Zip']), 10) if pd.notna(row['Shipping Zip']) else '',
-                    'phone': safe_str_slice(row['Shipping Phone'], 20) if pd.notna(row['Shipping Phone']) else ''
-                })
-            
             details.append(detail)
             
             # Only create SingPost entries for international non-US/CA orders
@@ -199,7 +187,7 @@ def convert_shopify_to_singpost(shopify_file, output_file):
                     size_str = size.split(" ")[0] if " " in size else size
                 
                 # Create simplified item description
-                simplified_description = f"Eczema mitten {quantity_str}{size_str} {material}"
+                simplified_description = f"Eczema Mitten {quantity_str}{size_str} {material}"
                 
                 singpost_row = {
                     'Send to business name line 1 (Max 35 characters) - *': safe_str_slice(row['Shipping Name'], 35),
@@ -354,18 +342,11 @@ def convert_shopify_to_singpost(shopify_file, output_file):
     else:
         summary += "\n\nNo international orders (excluding SG, US, CA) to export to SingPost"
     
-    # Generate shipping labels for Singapore orders
-    sg_labels_pdf = None
-    if sg_order_details:
-        sg_labels_pdf = generate_sg_shipping_labels(sg_order_details)
-        if sg_labels_pdf:
-            summary += f"\n\nGenerated shipping labels PDF: {sg_labels_pdf}"
-
-    return summary, sg_labels_pdf  # Return both summary and PDF path
+    return summary
 
 # Example usage
 if __name__ == "__main__":
-    result, pdf_path = convert_shopify_to_singpost(
+    result = convert_shopify_to_singpost(
         'orders_export.csv',
         'singpost_orders.csv'
     )
