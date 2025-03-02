@@ -85,34 +85,9 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
             if template_id:
                 print(f"Using existing presentation: {template_id}")
                 presentation_id = template_id
-                
-                # Update the presentation title to include the current date/time
-                try:
-                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
-                    requests = [{
-                        'updatePresentationProperties': {
-                            'fields': 'title',
-                            'presentationProperties': {
-                                'title': f"Shipping Labels - {current_time}"
-                            }
-                        }
-                    }]
-                    slides_service.presentations().batchUpdate(
-                        presentationId=presentation_id,
-                        body={'requests': requests}
-                    ).execute()
-                    print(f"Updated presentation title to include timestamp: {current_time}")
-                except Exception as e:
-                    print(f"Warning: Could not update presentation title: {str(e)}")
-                    # Continue anyway
             else:
-                print("No template ID provided, creating new presentation...")
-                presentation = {
-                    'title': f"Shipping Labels - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-                }
-                presentation = slides_service.presentations().create(body=presentation).execute()
-                presentation_id = presentation.get('presentationId')
-                print(f"Successfully created new presentation: {presentation_id}")
+                print("No template ID provided, cannot proceed")
+                return None, None
                 
             presentation_url = f"https://docs.google.com/presentation/d/{presentation_id}/edit"
             print(f"Presentation URL: {presentation_url}")
@@ -133,27 +108,80 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
             slides = presentation.get('slides', [])
             print(f"Presentation has {len(slides)} existing slides")
             
-            # Save the ID of the first slide if it exists (template slide)
-            template_slide_id = None
-            if slides:
-                template_slide_id = slides[0].get('objectId')
-                print(f"Found template slide with ID: {template_slide_id}")
+            # Ensure we have at least 2 slides (first for date, second for template)
+            if len(slides) < 2:
+                print("ERROR: Template presentation should have at least 2 slides")
+                return presentation_url, None
+                
+            # Save the date slide and template slide
+            date_slide_id = slides[0].get('objectId')
+            template_slide_id = slides[1].get('objectId')
+            
+            print(f"Found date slide with ID: {date_slide_id}")
+            print(f"Found template slide with ID: {template_slide_id}")
+            
+            # Store all slide IDs
+            all_slide_ids = [slide.get('objectId') for slide in slides]
         except Exception as e:
             print(f"ERROR getting presentation details: {str(e)}")
             import traceback
             traceback.print_exc()
-            # Continue with empty presentation
+            return None, None
         
-        # Remove all existing slides except the first one (template)
+        # Update the date on the first slide
         try:
-            print("Cleaning up existing slides...")
-            requests = []
+            print("Updating date on first slide...")
             
-            if slides:
-                # Start from index 1 to keep the first slide as template
-                for slide in slides[1:]:
-                    slide_id = slide.get('objectId')
-                    print(f"Deleting slide: {slide_id}")
+            # Get the current date
+            today = datetime.now().strftime("%B %d, %Y")
+            
+            # Find text elements on the first slide
+            date_slide = slides[0]
+            date_updated = False
+            
+            for element in date_slide.get('pageElements', []):
+                if 'shape' in element and 'text' in element.get('shape', {}):
+                    element_id = element.get('objectId')
+                    
+                    # Update the text to today's date
+                    requests = [{
+                        'deleteText': {
+                            'objectId': element_id,
+                            'textRange': {
+                                'type': 'ALL'
+                            }
+                        }
+                    }, {
+                        'insertText': {
+                            'objectId': element_id,
+                            'text': today
+                        }
+                    }]
+                    
+                    slides_service.presentations().batchUpdate(
+                        presentationId=presentation_id,
+                        body={'requests': requests}
+                    ).execute()
+                    
+                    date_updated = True
+                    print(f"Updated date to: {today}")
+                    break
+            
+            if not date_updated:
+                print("WARNING: Could not find text element on the date slide")
+        except Exception as e:
+            print(f"ERROR updating date slide: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            # Continue anyway
+        
+        # Clear all slides except the first two (date slide and template slide)
+        try:
+            if len(all_slide_ids) > 2:
+                print(f"Removing {len(all_slide_ids) - 2} existing order slides...")
+                requests = []
+                
+                for slide_id in all_slide_ids[2:]:
                     requests.append({
                         'deleteObject': {
                             'objectId': slide_id
@@ -161,342 +189,86 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
                     })
                 
                 if requests:
-                    # Submit deletion requests
-                    print(f"Submitting batch request to delete {len(requests)} slides...")
-                    response = slides_service.presentations().batchUpdate(
+                    slides_service.presentations().batchUpdate(
                         presentationId=presentation_id,
                         body={'requests': requests}
                     ).execute()
-                    print(f"Deletion completed: {len(response.get('replies', []))} replies")
+                    print("Removed old order slides")
         except Exception as e:
-            print(f"WARNING: Could not clean up existing slides: {str(e)}")
+            print(f"ERROR removing old slides: {str(e)}")
+            import traceback
+            traceback.print_exc()
             # Continue anyway
         
-        # Create shipping label slides for each order
+        # Create shipping label slides for each order by duplicating the template slide
         try:
             print(f"Creating shipping label slides for {len(order_details)} orders...")
             
-            # Process each order and create a slide
+            # Store the IDs of the newly created slides
+            new_slide_ids = []
+            
+            # Duplicate the template slide for each order
             for i, order in enumerate(order_details):
-                print(f"Processing order {i+1}: {order.get('order_number')}")
+                print(f"Creating slide for order {i+1}: {order.get('order_number')}")
                 
-                # Create a new slide, duplicating the template if available
-                requests = []
-                if template_slide_id:
-                    # Duplicate the template slide
-                    requests.append({
-                        'duplicateObject': {
-                            'objectId': template_slide_id,
-                        }
-                    })
-                else:
-                    # Create a blank slide if no template
-                    requests.append({
-                        'createSlide': {
-                            'slideLayoutReference': {
-                                'predefinedLayout': 'BLANK'
-                            }
-                        }
-                    })
+                # Duplicate the template slide
+                requests = [{
+                    'duplicateObject': {
+                        'objectId': template_slide_id,
+                    }
+                }]
                 
-                # Submit the request to create the slide
-                print(f"Submitting request to create slide for order {i+1}...")
                 response = slides_service.presentations().batchUpdate(
                     presentationId=presentation_id,
                     body={'requests': requests}
                 ).execute()
                 
-                # Get the newly created slide ID
-                slide_id = None
-                if 'duplicateObject' in response.get('replies', [{}])[0]:
-                    slide_id = response.get('replies', [{}])[0].get('duplicateObject', {}).get('objectId')
-                else:
-                    slide_id = response.get('replies', [{}])[0].get('createSlide', {}).get('objectId')
-                
-                if not slide_id:
-                    print(f"WARNING: Could not get slide ID for order {order.get('order_number')}")
+                # Get the ID of the newly created slide
+                new_slide_id = response.get('replies', [{}])[0].get('duplicateObject', {}).get('objectId')
+                if not new_slide_id:
+                    print(f"WARNING: Could not get ID for duplicated slide for order {order.get('order_number')}")
                     continue
+                    
+                new_slide_ids.append(new_slide_id)
+                print(f"Created new slide with ID: {new_slide_id}")
                 
-                print(f"Created slide with ID: {slide_id}")
-                
-                # Now find and update text placeholders on the slide
-                # First get the current slide details to find text elements
-                slide_details = slides_service.presentations().get(
-                    presentationId=presentation_id,
-                    fields="slides"
-                ).execute()
-                
-                # Find the right slide
-                current_slide = None
-                for slide in slide_details.get('slides', []):
-                    if slide.get('objectId') == slide_id:
-                        current_slide = slide
-                        break
-                
-                if not current_slide:
-                    print(f"WARNING: Cannot find slide {slide_id} in presentation")
-                    continue
-                
-                # Extract text elements from the slide
-                text_elements = []
-                for element in current_slide.get('pageElements', []):
-                    if 'shape' in element and 'text' in element.get('shape', {}):
-                        element_id = element.get('objectId')
-                        text_content = element.get('shape', {}).get('text', {}).get('textElements', [])
-                        
-                        # Look for placeholder text to identify what to replace
-                        placeholder_text = ''
-                        for text_element in text_content:
-                            if 'textRun' in text_element:
-                                text = text_element.get('textRun', {}).get('content', '')
-                                placeholder_text += text
-                        
-                        text_elements.append({
-                            'id': element_id,
-                            'text': placeholder_text.strip()
-                        })
-                
-                print(f"Found {len(text_elements)} text elements on slide")
-                
-                # Prepare replacements based on placeholders
-                content_requests = []
-                
-                for elem in text_elements:
-                    elem_id = elem.get('id')
-                    placeholder = elem.get('text', '').upper()
-                    
-                    # Skip elements with no text
-                    if not placeholder:
-                        continue
-                    
-                    print(f"Processing text element: '{placeholder}'")
-                    
-                    # Determine what to replace based on placeholder text
-                    if "ORDER" in placeholder:
-                        # This is the order number field
-                        content_requests.append({
-                            'deleteText': {
-                                'objectId': elem_id,
-                                'textRange': {
-                                    'type': 'ALL'
-                                }
-                            }
-                        })
-                        content_requests.append({
-                            'insertText': {
-                                'objectId': elem_id,
-                                'text': f"Order #{order.get('order_number')}"
-                            }
-                        })
-                    elif "NAME" in placeholder or "CUSTOMER" in placeholder:
-                        # Customer name field
-                        content_requests.append({
-                            'deleteText': {
-                                'objectId': elem_id,
-                                'textRange': {
-                                    'type': 'ALL'
-                                }
-                            }
-                        })
-                        content_requests.append({
-                            'insertText': {
-                                'objectId': elem_id,
-                                'text': order.get('name', '')
-                            }
-                        })
-                    elif "ADDRESS" in placeholder:
-                        # Address field
-                        address_parts = [
-                            order.get('address1', ''),
-                            order.get('address2', '') if order.get('address2') else '',
-                            f"Singapore {order.get('postal', '')}"
-                        ]
-                        # Filter out empty parts
-                        address_parts = [part for part in address_parts if part]
-                        
-                        content_requests.append({
-                            'deleteText': {
-                                'objectId': elem_id,
-                                'textRange': {
-                                    'type': 'ALL'
-                                }
-                            }
-                        })
-                        content_requests.append({
-                            'insertText': {
-                                'objectId': elem_id,
-                                'text': "\n".join(address_parts)
-                            }
-                        })
-                    elif "PHONE" in placeholder:
-                        # Phone number field
-                        content_requests.append({
-                            'deleteText': {
-                                'objectId': elem_id,
-                                'textRange': {
-                                    'type': 'ALL'
-                                }
-                            }
-                        })
-                        content_requests.append({
-                            'insertText': {
-                                'objectId': elem_id,
-                                'text': order.get('phone', 'N/A')
-                            }
-                        })
-                    elif "PRODUCT" in placeholder or "ITEM" in placeholder:
-                        # Product details field
-                        quantity = "2 Pairs" if order.get('is_bundle') else "1 Pair"
-                        product_info = f"Eczema Mittens - {quantity}\nSize: {order.get('size', 'Unknown')}\nMaterial: {order.get('material', 'Unknown')}"
-                        
-                        content_requests.append({
-                            'deleteText': {
-                                'objectId': elem_id,
-                                'textRange': {
-                                    'type': 'ALL'
-                                }
-                            }
-                        })
-                        content_requests.append({
-                            'insertText': {
-                                'objectId': elem_id,
-                                'text': product_info
-                            }
-                        })
-                
-                # If no placeholders were found, add generic content boxes
-                if not text_elements:
-                    print("No text placeholders found. Adding generic content...")
-                    
-                    # Add order number text box
-                    content_requests.append({
-                        'createShape': {
-                            'objectId': f'title_{i}',
-                            'shapeType': 'TEXT_BOX',
-                            'elementProperties': {
-                                'pageObjectId': slide_id,
-                                'size': {
-                                    'width': {'magnitude': 500, 'unit': 'PT'},
-                                    'height': {'magnitude': 50, 'unit': 'PT'}
-                                },
-                                'transform': {
-                                    'scaleX': 1,
-                                    'scaleY': 1,
-                                    'translateX': 50,
-                                    'translateY': 30,
-                                    'unit': 'PT'
-                                }
-                            }
-                        }
-                    })
-                    
-                    # Add text to the title box
-                    content_requests.append({
-                        'insertText': {
-                            'objectId': f'title_{i}',
-                            'text': f"Order #{order.get('order_number')}"
-                        }
-                    })
-                    
-                    # Add customer info box
-                    content_requests.append({
-                        'createShape': {
-                            'objectId': f'customer_{i}',
-                            'shapeType': 'TEXT_BOX',
-                            'elementProperties': {
-                                'pageObjectId': slide_id,
-                                'size': {
-                                    'width': {'magnitude': 300, 'unit': 'PT'},
-                                    'height': {'magnitude': 150, 'unit': 'PT'}
-                                },
-                                'transform': {
-                                    'scaleX': 1,
-                                    'scaleY': 1,
-                                    'translateX': 50,
-                                    'translateY': 100,
-                                    'unit': 'PT'
-                                }
-                            }
-                        }
-                    })
-                    
-                    # Compile address
-                    address_parts = [
-                        order.get('name', ''),
-                        order.get('address1', ''),
-                        order.get('address2', '')
-                    ]
-                    # Filter out empty parts
-                    address_parts = [part for part in address_parts if part]
-                    # Add postal code if available
-                    if order.get('postal'):
-                        address_parts.append(f"Singapore {order.get('postal')}")
-                    # Add phone if available
-                    if order.get('phone'):
-                        address_parts.append(f"Phone: {order.get('phone')}")
-                    
-                    # Insert address text
-                    content_requests.append({
-                        'insertText': {
-                            'objectId': f'customer_{i}',
-                            'text': "Ship To:\n" + "\n".join(address_parts)
-                        }
-                    })
-                    
-                    # Add product info box
-                    content_requests.append({
-                        'createShape': {
-                            'objectId': f'product_{i}',
-                            'shapeType': 'TEXT_BOX',
-                            'elementProperties': {
-                                'pageObjectId': slide_id,
-                                'size': {
-                                    'width': {'magnitude': 300, 'unit': 'PT'},
-                                    'height': {'magnitude': 150, 'unit': 'PT'}
-                                },
-                                'transform': {
-                                    'scaleX': 1,
-                                    'scaleY': 1,
-                                    'translateX': 400,
-                                    'translateY': 100,
-                                    'unit': 'PT'
-                                }
-                            }
-                        }
-                    })
-                    
-                    # Product details
-                    quantity = "2 Pairs" if order.get('is_bundle') else "1 Pair"
-                    product_details = [
-                        "Product: Eczema Mittens",
-                        f"Quantity: {quantity}",
-                        f"Size: {order.get('size', 'Unknown')}",
-                        f"Material: {order.get('material', 'Unknown')}"
-                    ]
-                    
-                    # Insert product text
-                    content_requests.append({
-                        'insertText': {
-                            'objectId': f'product_{i}',
-                            'text': "\n".join(product_details)
-                        }
-                    })
-                
-                # Submit the content requests
-                if content_requests:
-                    print(f"Submitting {len(content_requests)} content updates for slide {i+1}...")
-                    try:
-                        content_response = slides_service.presentations().batchUpdate(
-                            presentationId=presentation_id,
-                            body={'requests': content_requests}
-                        ).execute()
-                        print(f"Content updates completed: {len(content_response.get('replies', []))} replies")
-                    except Exception as e:
-                        print(f"ERROR updating slide content: {str(e)}")
-                        import traceback
-                        traceback.print_exc()
+                # Update the text on the new slide with order details
+                try:
+                    update_order_slide(slides_service, presentation_id, new_slide_id, order)
+                except Exception as e:
+                    print(f"ERROR updating slide content for order {order.get('order_number')}: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
             
-            print("All slides created successfully!")
+            # Move all new slides after the date slide
+            print("Rearranging slides...")
+            requests = []
+            
+            # Position new slides after the date slide (keep template slide at the end)
+            for i, slide_id in enumerate(new_slide_ids):
+                requests.append({
+                    'updateSlidesPosition': {
+                        'slideObjectIds': [slide_id],
+                        'insertionIndex': i + 1  # Position after date slide
+                    }
+                })
+            
+            # Move template slide to the end
+            requests.append({
+                'updateSlidesPosition': {
+                    'slideObjectIds': [template_slide_id],
+                    'insertionIndex': len(new_slide_ids) + 1  # Position after all new slides
+                }
+            })
+            
+            if requests:
+                slides_service.presentations().batchUpdate(
+                    presentationId=presentation_id,
+                    body={'requests': requests}
+                ).execute()
+                print("Slides rearranged successfully")
+            
+            print("All slides created and positioned successfully!")
             
             # Attempt to create a PDF export
             # Note: Direct PDF export is limited with the Drive API, so we'll just
@@ -517,6 +289,136 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
         import traceback
         traceback.print_exc()
         return None, None
+
+def update_order_slide(slides_service, presentation_id, slide_id, order):
+    """
+    Update a slide with order information
+    
+    Args:
+        slides_service: Google Slides API service
+        presentation_id: ID of the presentation
+        slide_id: ID of the slide to update
+        order: Dictionary containing order information
+    """
+    print(f"Updating slide {slide_id} with order details for {order.get('order_number')}")
+    
+    # Get the slide details
+    slide = slides_service.presentations().get(
+        presentationId=presentation_id,
+        fields=f"slides(objectId,pageElements)"
+    ).execute()
+    
+    # Find the slide
+    target_slide = None
+    for s in slide.get('slides', []):
+        if s.get('objectId') == slide_id:
+            target_slide = s
+            break
+    
+    if not target_slide:
+        print(f"WARNING: Could not find slide {slide_id} in presentation")
+        return
+    
+    # Look for text elements that contain specific keywords
+    requests = []
+    
+    for element in target_slide.get('pageElements', []):
+        if 'shape' in element and 'text' in element.get('shape', {}):
+            element_id = element.get('objectId')
+            text_content = element.get('shape', {}).get('text', {}).get('textElements', [])
+            
+            if not text_content:
+                continue
+            
+            full_text = ""
+            for text_element in text_content:
+                if 'textRun' in text_element:
+                    full_text += text_element.get('textRun', {}).get('content', '')
+            
+            # Clean up text and convert to uppercase for matching
+            clean_text = full_text.strip().upper()
+            
+            # Find fields to update based on content
+            if "NAME:" in clean_text:
+                # This is the order number/name field
+                new_text = f"Name: #{order.get('order_number')} {order.get('name', '')}"
+                requests.append(create_text_update_request(element_id, new_text))
+                print(f"Updated customer name: {new_text}")
+                
+            elif "CONTACT: +65 9" in clean_text:
+                # This is the customer contact field
+                new_text = f"Contact: {order.get('phone', 'N/A')}"
+                requests.append(create_text_update_request(element_id, new_text))
+                print(f"Updated customer phone: {new_text}")
+                
+            elif "DELIVERY ADDRESS:" in clean_text:
+                # This is the delivery address field
+                address_parts = []
+                if order.get('address1'):
+                    address_parts.append(order.get('address1'))
+                if order.get('address2'):
+                    address_parts.append(order.get('address2'))
+                
+                address_text = f"Delivery Address:\n{' '.join(address_parts)}"
+                requests.append(create_text_update_request(element_id, address_text))
+                print(f"Updated delivery address: {address_text}")
+                
+            elif "POSTAL: 5" in clean_text:
+                # This is the customer postal code field
+                new_text = f"Postal: {order.get('postal', '')}"
+                requests.append(create_text_update_request(element_id, new_text))
+                print(f"Updated postal code: {new_text}")
+                
+            elif "ITEM: " in clean_text:
+                # This is the item field
+                quantity = "2" if order.get('is_bundle') else "1"
+                size = order.get('size', '')
+                material = order.get('material', '')
+                
+                item_text = f"Item: {quantity} {size} {material} Eczema Mitten"
+                requests.append(create_text_update_request(element_id, item_text))
+                print(f"Updated item details: {item_text}")
+    
+    # Submit the updates
+    if requests:
+        print(f"Submitting {len(requests)} text updates for slide...")
+        try:
+            response = slides_service.presentations().batchUpdate(
+                presentationId=presentation_id,
+                body={'requests': requests}
+            ).execute()
+            print(f"Successfully updated slide with {len(response.get('replies', []))} changes")
+        except Exception as e:
+            print(f"ERROR updating slide: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    else:
+        print("WARNING: No text elements were updated on the slide")
+
+def create_text_update_request(element_id, new_text):
+    """
+    Create a request to update text on a slide
+    
+    Args:
+        element_id: ID of the text element
+        new_text: New text content
+        
+    Returns:
+        dict: Request object for batchUpdate
+    """
+    return [{
+        'deleteText': {
+            'objectId': element_id,
+            'textRange': {
+                'type': 'ALL'
+            }
+        }
+    }, {
+        'insertText': {
+            'objectId': element_id,
+            'text': new_text
+        }
+    }]
 
 def get_template_id_from_url(url):
     """Extract the presentation ID from a Google Slides URL"""
