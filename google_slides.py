@@ -1,4 +1,5 @@
 import os
+import json
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from datetime import datetime, timedelta
@@ -114,12 +115,273 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
             traceback.print_exc()
             return None, None
         
-        # The rest of the function code goes here... 
-        # (Include all existing slides creation code)
+        # Get current presentation details to understand slide layout
+        try:
+            presentation = slides_service.presentations().get(
+                presentationId=presentation_id
+            ).execute()
+            print(f"Fetched presentation details, title: {presentation.get('title')}")
+            
+            # Get existing slides
+            slides = presentation.get('slides', [])
+            print(f"Presentation has {len(slides)} existing slides")
+            
+            # If using template, we may want to manipulate existing slides
+            # For now, we'll create new slides for each order
+        except Exception as e:
+            print(f"ERROR getting presentation details: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            # Continue with empty presentation
         
-        # At the end
-        print(f"Successfully created presentation with URL: {presentation_url}")
-        return presentation_url, None
+        # Create shipping label slides for each order
+        try:
+            print(f"Creating shipping label slides for {len(order_details)} orders...")
+            
+            # Create a batch update request
+            requests = []
+            
+            # If template slide exists, clean it up
+            # (This code assumes we're not using template content)
+            if template_id is None:
+                # Delete any existing slides
+                print("Deleting any default slides...")
+                existing_slides = slides_service.presentations().get(
+                    presentationId=presentation_id
+                ).execute().get('slides', [])
+                
+                for slide in existing_slides:
+                    slide_id = slide.get('objectId')
+                    requests.append({
+                        'deleteObject': {
+                            'objectId': slide_id
+                        }
+                    })
+            
+            # Process each order and create a slide
+            for i, order in enumerate(order_details):
+                print(f"Processing order {i+1}: {order.get('order_number')}")
+                
+                # Create a new slide
+                requests.append({
+                    'createSlide': {
+                        'insertionIndex': i,
+                        'slideLayoutReference': {
+                            'predefinedLayout': 'BLANK'
+                        }
+                    }
+                })
+                
+                # Since we need the slide ID for adding content, we'll submit the batch
+                # request to create the slide first, then add content in separate requests
+                if len(requests) > 0:
+                    print(f"Submitting batch request to create slide {i+1}...")
+                    response = slides_service.presentations().batchUpdate(
+                        presentationId=presentation_id,
+                        body={'requests': requests}
+                    ).execute()
+                    print(f"Batch request completed: {len(response.get('replies', []))} replies")
+                    requests = []  # Clear requests
+                    
+                    # Get the newly created slide ID
+                    slide_id = response.get('replies', [{}])[0].get('createSlide', {}).get('objectId')
+                    if not slide_id:
+                        print(f"WARNING: Could not get slide ID for order {order.get('order_number')}")
+                        continue
+                    
+                    # Now add content to the slide
+                    content_requests = []
+                    
+                    # Add a title box with order number
+                    content_requests.append({
+                        'createShape': {
+                            'objectId': f'title_{i}',
+                            'shapeType': 'TEXT_BOX',
+                            'elementProperties': {
+                                'pageObjectId': slide_id,
+                                'size': {
+                                    'width': {'magnitude': 500, 'unit': 'PT'},
+                                    'height': {'magnitude': 50, 'unit': 'PT'}
+                                },
+                                'transform': {
+                                    'scaleX': 1,
+                                    'scaleY': 1,
+                                    'translateX': 50,
+                                    'translateY': 30,
+                                    'unit': 'PT'
+                                }
+                            }
+                        }
+                    })
+                    
+                    # Add text to the title box
+                    content_requests.append({
+                        'insertText': {
+                            'objectId': f'title_{i}',
+                            'text': f"Order #{order.get('order_number')}"
+                        }
+                    })
+                    
+                    # Style the title text
+                    content_requests.append({
+                        'updateTextStyle': {
+                            'objectId': f'title_{i}',
+                            'textRange': {
+                                'type': 'ALL'
+                            },
+                            'style': {
+                                'bold': True,
+                                'fontSize': {
+                                    'magnitude': 20,
+                                    'unit': 'PT'
+                                }
+                            },
+                            'fields': 'bold,fontSize'
+                        }
+                    })
+                    
+                    # Add customer info box
+                    content_requests.append({
+                        'createShape': {
+                            'objectId': f'customer_{i}',
+                            'shapeType': 'TEXT_BOX',
+                            'elementProperties': {
+                                'pageObjectId': slide_id,
+                                'size': {
+                                    'width': {'magnitude': 300, 'unit': 'PT'},
+                                    'height': {'magnitude': 150, 'unit': 'PT'}
+                                },
+                                'transform': {
+                                    'scaleX': 1,
+                                    'scaleY': 1,
+                                    'translateX': 50,
+                                    'translateY': 100,
+                                    'unit': 'PT'
+                                }
+                            }
+                        }
+                    })
+                    
+                    # Compile address
+                    address_parts = [
+                        order.get('name', ''),
+                        order.get('address1', ''),
+                        order.get('address2', '')
+                    ]
+                    # Filter out empty parts
+                    address_parts = [part for part in address_parts if part]
+                    # Add postal code if available
+                    if order.get('postal'):
+                        address_parts.append(f"Postal: {order.get('postal')}")
+                    # Add phone if available
+                    if order.get('phone'):
+                        address_parts.append(f"Phone: {order.get('phone')}")
+                    
+                    # Insert address text
+                    content_requests.append({
+                        'insertText': {
+                            'objectId': f'customer_{i}',
+                            'text': "Ship To:\n" + "\n".join(address_parts)
+                        }
+                    })
+                    
+                    # Style address text
+                    content_requests.append({
+                        'updateTextStyle': {
+                            'objectId': f'customer_{i}',
+                            'textRange': {
+                                'type': 'ALL'
+                            },
+                            'style': {
+                                'fontSize': {
+                                    'magnitude': 12,
+                                    'unit': 'PT'
+                                }
+                            },
+                            'fields': 'fontSize'
+                        }
+                    })
+                    
+                    # Add product info box
+                    content_requests.append({
+                        'createShape': {
+                            'objectId': f'product_{i}',
+                            'shapeType': 'TEXT_BOX',
+                            'elementProperties': {
+                                'pageObjectId': slide_id,
+                                'size': {
+                                    'width': {'magnitude': 300, 'unit': 'PT'},
+                                    'height': {'magnitude': 150, 'unit': 'PT'}
+                                },
+                                'transform': {
+                                    'scaleX': 1,
+                                    'scaleY': 1,
+                                    'translateX': 400,
+                                    'translateY': 100,
+                                    'unit': 'PT'
+                                }
+                            }
+                        }
+                    })
+                    
+                    # Product details
+                    quantity = "2 Pairs" if order.get('is_bundle') else "1 Pair"
+                    product_details = [
+                        "Product: Eczema Mittens",
+                        f"Quantity: {quantity}",
+                        f"Size: {order.get('size', 'Unknown')}",
+                        f"Material: {order.get('material', 'Unknown')}"
+                    ]
+                    
+                    # Insert product text
+                    content_requests.append({
+                        'insertText': {
+                            'objectId': f'product_{i}',
+                            'text': "\n".join(product_details)
+                        }
+                    })
+                    
+                    # Style product text
+                    content_requests.append({
+                        'updateTextStyle': {
+                            'objectId': f'product_{i}',
+                            'textRange': {
+                                'type': 'ALL'
+                            },
+                            'style': {
+                                'fontSize': {
+                                    'magnitude': 12,
+                                    'unit': 'PT'
+                                }
+                            },
+                            'fields': 'fontSize'
+                        }
+                    })
+                    
+                    # Submit the content requests
+                    if len(content_requests) > 0:
+                        print(f"Submitting content requests for slide {i+1}...")
+                        content_response = slides_service.presentations().batchUpdate(
+                            presentationId=presentation_id,
+                            body={'requests': content_requests}
+                        ).execute()
+                        print(f"Content batch completed: {len(content_response.get('replies', []))} replies")
+            
+            print("All slides created successfully!")
+            
+            # Attempt to create a PDF export
+            # Note: Direct PDF export is limited with the Drive API, so we'll just
+            # return None for pdf_path, and users will need to download PDF from Google Slides UI
+            pdf_path = None
+            
+            return presentation_url, pdf_path
+            
+        except Exception as e:
+            print(f"ERROR creating slides: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            # Return the URL if we have it, even if there was an error adding content
+            return presentation_url, None
         
     except Exception as e:
         print(f"ERROR in create_shipping_slides: {str(e)}")
@@ -129,12 +391,13 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
 
 def get_template_id_from_url(url):
     """Extract the presentation ID from a Google Slides URL"""
+    if not url:
+        return None
+        
     match = re.search(r'/d/([a-zA-Z0-9-_]+)', url)
     if match:
         return match.group(1)
     return None
-
-# Add this function to google_slides.py
 
 def check_template_permissions(credentials_path, template_id):
     """
