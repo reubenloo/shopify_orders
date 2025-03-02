@@ -5,7 +5,6 @@ from google.oauth2 import service_account
 from datetime import datetime, timedelta
 import re
 import pytz
-import copy
 
 def create_shipping_slides(order_details, credentials_path, template_id=None):
     """
@@ -98,145 +97,112 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
             traceback.print_exc()
             return None, None
         
-        # SIMPLIFIED APPROACH: Use duplicateObject API call for copying slides
+        # Get current presentation details to understand slide layout
         try:
-            # Step 1: Create a copy of the entire presentation as a temporary working copy
-            print("Creating a new batch of slides at the top...")
-            
-            # First, get the date from the first slide
             presentation = slides_service.presentations().get(
                 presentationId=presentation_id
             ).execute()
+            print(f"Fetched presentation details, title: {presentation.get('title')}")
             
+            # Get existing slides
             slides = presentation.get('slides', [])
-            if len(slides) < 2:
-                print("ERROR: Presentation must have at least 2 slides (date and template)")
-                return presentation_url, None
+            print(f"Presentation has {len(slides)} existing slides")
             
-            # Create a new date slide by duplicating the first slide
-            date_request = [{
-                'duplicateObject': {
-                    'objectId': slides[0].get('objectId'),
+            # Ensure we have at least 2 slides (first for date, second for template)
+            if len(slides) < 2:
+                print("ERROR: Template presentation should have at least 2 slides")
+                return presentation_url, None
+                
+            # Save the date slide and template slide
+            date_slide_id = slides[0].get('objectId')
+            template_slide_id = slides[1].get('objectId')
+            
+            print(f"Found date slide with ID: {date_slide_id}")
+            print(f"Found template slide with ID: {template_slide_id}")
+        except Exception as e:
+            print(f"ERROR getting presentation details: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None, None
+        
+        # IMPLEMENTATION OF THE NEW APPROACH
+        try:
+            # Step 1: Insert a new date slide at the beginning
+            print("Creating new date slide at the beginning...")
+            
+            date_requests = [{
+                'createSlide': {
+                    'insertionIndex': 0,  # Place at the beginning
+                    'slideLayoutReference': {
+                        'predefinedLayout': 'BLANK'
+                    }
                 }
             }]
             
             date_response = slides_service.presentations().batchUpdate(
                 presentationId=presentation_id,
-                body={'requests': date_request}
+                body={'requests': date_requests}
             ).execute()
             
-            new_date_slide_id = date_response.get('replies', [{}])[0].get('duplicateObject', {}).get('objectId')
-            print(f"Created new date slide with ID: {new_date_slide_id}")
-            
-            # Update the date on the new slide
-            # First get text elements on the new date slide
-            new_slides_data = slides_service.presentations().get(
-                presentationId=presentation_id,
-                fields="slides"
-            ).execute()
-            
-            # Find the newly created date slide
-            new_date_slide = None
-            for slide in new_slides_data.get('slides', []):
-                if slide.get('objectId') == new_date_slide_id:
-                    new_date_slide = slide
-                    break
-            
-            if new_date_slide:
-                # Update the date text
-                for element in new_date_slide.get('pageElements', []):
-                    if 'shape' in element and 'text' in element.get('shape', {}):
-                        element_id = element.get('objectId')
-                        today = datetime.now().strftime("%B %d, %Y")
-                        
-                        date_update_request = [{
-                            'deleteText': {
-                                'objectId': element_id,
-                                'textRange': {
-                                    'type': 'ALL'
-                                }
-                            }
-                        }, {
-                            'insertText': {
-                                'objectId': element_id,
-                                'text': today
-                            }
-                        }]
-                        
-                        slides_service.presentations().batchUpdate(
-                            presentationId=presentation_id,
-                            body={'requests': date_update_request}
-                        ).execute()
-                        print(f"Updated date to: {today}")
-                        break
-            
-            # Move the new date slide to the beginning
-            move_date_request = [{
-                'updateSlidesPosition': {
-                    'slideObjectIds': [new_date_slide_id],
-                    'insertionIndex': 0
-                }
-            }]
-            
-            slides_service.presentations().batchUpdate(
-                presentationId=presentation_id,
-                body={'requests': move_date_request}
-            ).execute()
-            print("Moved date slide to the beginning")
-            
-            # Now create a slide for each order by duplicating the template slide (slide 2)
-            template_slide_id = slides[1].get('objectId')
-            print(f"Using template slide ID: {template_slide_id}")
-            
-            # Track the new slide IDs
-            new_order_slide_ids = []
-            
-            # Create a slide for each order
-            for i, order in enumerate(order_details):
-                print(f"Creating slide for order {i+1}: {order.get('order_number')}")
+            new_date_slide_id = date_response.get('replies', [{}])[0].get('createSlide', {}).get('objectId')
+            if not new_date_slide_id:
+                print("WARNING: Could not get ID for the new date slide")
+            else:
+                print(f"Created new date slide with ID: {new_date_slide_id}")
                 
-                # Duplicate the template slide
-                order_request = [{
-                    'duplicateObject': {
-                        'objectId': template_slide_id,
+                # Copy content from the original date slide to the new date slide
+                copy_slide_content(slides_service, presentation_id, date_slide_id, new_date_slide_id)
+                
+                # Update the date on the new date slide
+                update_date_slide(slides_service, presentation_id, new_date_slide_id)
+            
+            # Step 2: Create order detail slides, one for each order
+            print(f"Creating {len(order_details)} order slides...")
+            new_slide_ids = []
+            insertion_index = 1  # Start after the new date slide
+            
+            for i, order in enumerate(order_details):
+                print(f"Processing order {i+1}: {order.get('order_number')}")
+                
+                # Create a new slide and insert it after the date slide
+                order_slide_requests = [{
+                    'createSlide': {
+                        'insertionIndex': insertion_index + i,  # Position after date slide and previous order slides
+                        'slideLayoutReference': {
+                            'predefinedLayout': 'BLANK'
+                        }
                     }
                 }]
                 
-                order_response = slides_service.presentations().batchUpdate(
+                order_slide_response = slides_service.presentations().batchUpdate(
                     presentationId=presentation_id,
-                    body={'requests': order_request}
+                    body={'requests': order_slide_requests}
                 ).execute()
                 
-                new_slide_id = order_response.get('replies', [{}])[0].get('duplicateObject', {}).get('objectId')
-                new_order_slide_ids.append(new_slide_id)
+                new_slide_id = order_slide_response.get('replies', [{}])[0].get('createSlide', {}).get('objectId')
+                if not new_slide_id:
+                    print(f"WARNING: Could not get ID for the new order slide {i+1}")
+                    continue
+                    
                 print(f"Created new order slide with ID: {new_slide_id}")
+                new_slide_ids.append(new_slide_id)
+                
+                # Copy content from the template slide to the new order slide
+                copy_slide_content(slides_service, presentation_id, template_slide_id, new_slide_id)
                 
                 # Update the order details on this slide
                 update_order_details(slides_service, presentation_id, new_slide_id, order)
             
-            # Reposition all the new order slides after the date slide
-            for i, slide_id in enumerate(new_order_slide_ids):
-                move_request = [{
-                    'updateSlidesPosition': {
-                        'slideObjectIds': [slide_id],
-                        'insertionIndex': i + 1  # Position after date slide
-                    }
-                }]
-                
-                slides_service.presentations().batchUpdate(
-                    presentationId=presentation_id,
-                    body={'requests': move_request}
-                ).execute()
-                
-            print(f"Successfully repositioned {len(new_order_slide_ids)} order slides")
+            # Success!
+            print(f"Successfully created {len(new_slide_ids)} new order slides")
             
-            # No PDF generation in this version
+            # Attempt to create a PDF export (not implemented in this version)
             pdf_path = None
             
             return presentation_url, pdf_path
             
         except Exception as e:
-            print(f"ERROR in slide creation: {str(e)}")
+            print(f"ERROR in main slide creation: {str(e)}")
             import traceback
             traceback.print_exc()
             return presentation_url, None
@@ -246,6 +212,197 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
         import traceback
         traceback.print_exc()
         return None, None
+
+def copy_slide_content(slides_service, presentation_id, source_slide_id, target_slide_id):
+    """
+    Copy content (currently only shape elements with text) from a source slide to a target slide.
+    """
+    print(f"Copying content from slide {source_slide_id} to slide {target_slide_id}...")
+    
+    try:
+        # Get the source slide's elements
+        presentation = slides_service.presentations().get(
+            presentationId=presentation_id,
+            fields="slides(objectId,pageElements)"
+        ).execute()
+        
+        source_slide = None
+        for slide in presentation.get('slides', []):
+            if slide.get('objectId') == source_slide_id:
+                source_slide = slide
+                break
+                
+        if not source_slide:
+            print(f"WARNING: Could not find source slide {source_slide_id}")
+            return
+            
+        create_requests = []
+        element_counter = 0
+        
+        for element in source_slide.get('pageElements', []):
+            element_counter += 1
+            # Process only shape elements (extend later for images, tables, etc.)
+            if 'shape' in element:
+                shape = element['shape']
+                shape_type = shape.get('shapeType', 'RECTANGLE')
+                
+                # Build elementProperties explicitly
+                element_properties = {}
+                if 'transform' in element:
+                    element_properties['transform'] = element['transform']
+                if 'size' in element:
+                    element_properties['size'] = element['size']
+                # Set target slide for the new element
+                element_properties['pageObjectId'] = target_slide_id
+                
+                new_object_id = f"{target_slide_id}_{element_counter}"
+                
+                # Create the shape on the target slide
+                shape_request = {
+                    'createShape': {
+                        'objectId': new_object_id,
+                        'shapeType': shape_type,
+                        'elementProperties': element_properties
+                    }
+                }
+                create_requests.append(shape_request)
+                
+                # Check if the shape had text and extract it
+                text = ""
+                if 'text' in shape:
+                    text_elements = shape.get('text', {}).get('textElements', [])
+                    for text_element in text_elements:
+                        if 'textRun' in text_element:
+                            text += text_element['textRun'].get('content', '')
+                
+                if text.strip():
+                    # Insert the text into the newly created shape
+                    insert_text_request = {
+                        'insertText': {
+                            'objectId': new_object_id,
+                            'insertionIndex': 0,
+                            'text': text
+                        }
+                    }
+                    create_requests.append(insert_text_request)
+                    
+            # You could add additional handling for images, tables, etc.
+        
+        if create_requests:
+            slides_service.presentations().batchUpdate(
+                presentationId=presentation_id,
+                body={'requests': create_requests}
+            ).execute()
+            print(f"Successfully copied {len(create_requests)} element requests to target slide")
+        else:
+            print("WARNING: No elements were found to copy")
+        
+    except Exception as e:
+        print(f"ERROR copying slide content: {str(e)}")
+        import traceback
+        traceback.print_exc()
+
+
+def update_date_slide(slides_service, presentation_id, slide_id):
+    """
+    Update the date on a slide to today's date
+    
+    Args:
+        slides_service: Google Slides API service
+        presentation_id: ID of the presentation
+        slide_id: ID of the date slide
+    """
+    print(f"Updating date on slide {slide_id}...")
+    
+    try:
+        # Get today's date
+        today = datetime.now().strftime("%B %d, %Y")
+        
+        # Get the slide details
+        slide_data = slides_service.presentations().get(
+            presentationId=presentation_id,
+            fields="slides"
+        ).execute()
+        
+        # Find our target slide
+        target_slide = None
+        for slide in slide_data.get('slides', []):
+            if slide.get('objectId') == slide_id:
+                target_slide = slide
+                break
+                
+        if not target_slide:
+            print(f"WARNING: Could not find slide {slide_id}")
+            return
+            
+        # Find and update the text elements
+        for element in target_slide.get('pageElements', []):
+            if 'shape' in element and 'text' in element.get('shape', {}):
+                # Found a text element, update it with today's date
+                element_id = element.get('objectId')
+                
+                requests = [{
+                    'deleteText': {
+                        'objectId': element_id,
+                        'textRange': {
+                            'type': 'ALL'
+                        }
+                    }
+                }, {
+                    'insertText': {
+                        'objectId': element_id,
+                        'text': today
+                    }
+                }]
+                
+                slides_service.presentations().batchUpdate(
+                    presentationId=presentation_id,
+                    body={'requests': requests}
+                ).execute()
+                
+                print(f"Updated date to: {today}")
+                break  # Only update the first text element
+                
+        # If no text element exists, create one
+        if not target_slide.get('pageElements'):
+            print("Creating new text element for date")
+            create_requests = [{
+                'createShape': {
+                    'objectId': f"date_text_{slide_id}",
+                    'shapeType': 'TEXT_BOX',
+                    'elementProperties': {
+                        'pageObjectId': slide_id,
+                        'size': {
+                            'width': {'magnitude': 300, 'unit': 'PT'},
+                            'height': {'magnitude': 50, 'unit': 'PT'}
+                        },
+                        'transform': {
+                            'scaleX': 1,
+                            'scaleY': 1,
+                            'translateX': 100,
+                            'translateY': 100,
+                            'unit': 'PT'
+                        }
+                    }
+                }
+            }, {
+                'insertText': {
+                    'objectId': f"date_text_{slide_id}",
+                    'text': today
+                }
+            }]
+            
+            slides_service.presentations().batchUpdate(
+                presentationId=presentation_id,
+                body={'requests': create_requests}
+            ).execute()
+            
+            print(f"Created and updated date to: {today}")
+        
+    except Exception as e:
+        print(f"ERROR updating date slide: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
 def update_order_details(slides_service, presentation_id, slide_id, order):
     """
@@ -259,12 +416,8 @@ def update_order_details(slides_service, presentation_id, slide_id, order):
     """
     print(f"Updating slide {slide_id} with order details for {order.get('order_number')}")
     
-    # Wait a moment to ensure the slide duplication is complete
-    import time
-    time.sleep(0.5)
-    
     try:
-        # Get fresh slide data
+        # Get the slide details
         slide_data = slides_service.presentations().get(
             presentationId=presentation_id
         ).execute()
@@ -280,6 +433,33 @@ def update_order_details(slides_service, presentation_id, slide_id, order):
             print(f"WARNING: Could not find slide {slide_id}")
             return
         
+        # Create a map of fields to look for and their updated values
+        field_map = {
+            'NAME': {
+                'pattern': ['NAME:', 'NAME :', 'NAME #'],
+                'new_text': f"Name: #{order.get('order_number')} {order.get('name', '')}"
+            },
+            'CONTACT': {
+                'pattern': ['CONTACT:', 'CONTACT :', '+65 9'],
+                'excludes': ['ECZEMA', 'COMPANY'],
+                'new_text': f"Contact: {order.get('phone', 'N/A')}"
+            },
+            'ADDRESS': {
+                'pattern': ['DELIVERY ADDRESS:', 'DELIVERY ADDRESS :', 'ADDRESS:'],
+                'excludes': ['RETURN'],
+                'new_text': f"Delivery Address:\n{order.get('address1', '')}\n{order.get('address2', '')}"
+            },
+            'POSTAL': {
+                'pattern': ['POSTAL:', 'POSTAL :', 'POSTAL CODE:'],
+                'excludes': ['680', 'RETURN'],
+                'new_text': f"Postal: {order.get('postal', '')}"
+            },
+            'ITEM': {
+                'pattern': ['ITEM:', 'ITEM :', 'PRODUCT:'],
+                'new_text': f"Item: {2 if order.get('is_bundle') else 1} {order.get('size', '')} {order.get('material', '')} Eczema Mitten"
+            }
+        }
+        
         # Keep track of all update requests
         all_requests = []
         
@@ -287,130 +467,49 @@ def update_order_details(slides_service, presentation_id, slide_id, order):
         for element in target_slide.get('pageElements', []):
             if 'shape' in element and 'text' in element.get('shape', {}):
                 element_id = element.get('objectId')
-                
-                # Get all text elements inside this shape
-                text_elements = element.get('shape', {}).get('text', {}).get('textElements', [])
+                text_content = element.get('shape', {}).get('text', {}).get('textElements', [])
                 
                 # Extract the full text of this element
                 full_text = ""
-                for text_element in text_elements:
+                for text_element in text_content:
                     if 'textRun' in text_element:
                         full_text += text_element.get('textRun', {}).get('content', '')
                 
-                # Clean up the text and print for debugging
-                clean_text = full_text.strip()
+                # Clean up the text and convert to uppercase for matching
+                clean_text = full_text.strip().upper()
+                
+                # Print detected text for debugging
                 print(f"Found text element: '{clean_text}'")
                 
-                # MUCH SIMPLER FIELD DETECTION
-                # Instead of complex pattern matching, look for common text patterns
-                clean_upper = clean_text.upper()
-                
-                if "NAME:" in clean_upper and "COMPANY:" not in clean_upper:
-                    # This is the name field for the customer
-                    new_text = f"Name: #{order.get('order_number')} {order.get('name', '')}"
+                # Check each field to see if this element matches
+                for field, config in field_map.items():
+                    patterns = config['pattern']
+                    excludes = config.get('excludes', [])
                     
-                    all_requests.extend([{
-                        'deleteText': {
-                            'objectId': element_id,
-                            'textRange': {
-                                'type': 'ALL'
+                    # Check if any pattern matches and no excludes match
+                    pattern_match = any(p.upper() in clean_text for p in patterns)
+                    exclude_match = any(e.upper() in clean_text for e in excludes)
+                    
+                    if pattern_match and not exclude_match:
+                        print(f"Identified {field} field: '{clean_text}'")
+                        
+                        # Create requests to update this field
+                        all_requests.extend([{
+                            'deleteText': {
+                                'objectId': element_id,
+                                'textRange': {
+                                    'type': 'ALL'
+                                }
                             }
-                        }
-                    }, {
-                        'insertText': {
-                            'objectId': element_id,
-                            'text': new_text
-                        }
-                    }])
-                    print(f"Will update name to: {new_text}")
-                    
-                elif "CONTACT:" in clean_upper and "ECZEMA" not in clean_upper:
-                    # This is the customer contact field
-                    new_text = f"Contact: {order.get('phone', 'N/A')}"
-                    
-                    all_requests.extend([{
-                        'deleteText': {
-                            'objectId': element_id,
-                            'textRange': {
-                                'type': 'ALL'
+                        }, {
+                            'insertText': {
+                                'objectId': element_id,
+                                'text': config['new_text']
                             }
-                        }
-                    }, {
-                        'insertText': {
-                            'objectId': element_id,
-                            'text': new_text
-                        }
-                    }])
-                    print(f"Will update contact to: {new_text}")
-                    
-                elif "DELIVERY ADDRESS:" in clean_upper:
-                    # This is the delivery address field
-                    address_parts = []
-                    if order.get('address1'):
-                        address_parts.append(order.get('address1'))
-                    if order.get('address2'):
-                        address_parts.append(order.get('address2'))
-                    
-                    new_text = "Delivery Address:"
-                    if address_parts:
-                        new_text += "\n" + "\n".join(address_parts)
-                    
-                    all_requests.extend([{
-                        'deleteText': {
-                            'objectId': element_id,
-                            'textRange': {
-                                'type': 'ALL'
-                            }
-                        }
-                    }, {
-                        'insertText': {
-                            'objectId': element_id,
-                            'text': new_text
-                        }
-                    }])
-                    print(f"Will update delivery address to: {new_text}")
-                    
-                elif "POSTAL:" in clean_upper and "RETURN ADDRESS:" not in clean_upper:
-                    # This is the customer postal code field
-                    new_text = f"Postal: {order.get('postal', '')}"
-                    
-                    all_requests.extend([{
-                        'deleteText': {
-                            'objectId': element_id,
-                            'textRange': {
-                                'type': 'ALL'
-                            }
-                        }
-                    }, {
-                        'insertText': {
-                            'objectId': element_id,
-                            'text': new_text
-                        }
-                    }])
-                    print(f"Will update postal code to: {new_text}")
-                    
-                elif "ITEM:" in clean_upper:
-                    # This is the product details field
-                    quantity = "2" if order.get('is_bundle') else "1"
-                    size = order.get('size', '')
-                    material = order.get('material', '')
-                    
-                    new_text = f"Item: {quantity} {size} {material} Eczema Mitten"
-                    
-                    all_requests.extend([{
-                        'deleteText': {
-                            'objectId': element_id,
-                            'textRange': {
-                                'type': 'ALL'
-                            }
-                        }
-                    }, {
-                        'insertText': {
-                            'objectId': element_id,
-                            'text': new_text
-                        }
-                    }])
-                    print(f"Will update item to: {new_text}")
+                        }])
+                        
+                        print(f"Will update {field} to: {config['new_text']}")
+                        break  # Move to next element
         
         # Submit all update requests at once
         if all_requests:
