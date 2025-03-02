@@ -387,4 +387,7 @@ def print_region_breakdown(region_name, product_counter, order_details):
     output += f"\n\nTotal {region_name} orders: {len(order_details)}"
     output += f"\nTotal {region_name} pieces: {total_pieces}"
     
+    
+    
     return output
+
