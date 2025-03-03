@@ -95,7 +95,7 @@ def parse_product_details(lineitem_name):
 def convert_shopify_to_singpost(shopify_file, output_file):
     # Check if input file exists
     if not os.path.exists(shopify_file):
-        return f"Error: Input file '{shopify_file}' not found. Please check the file path.", None, None, None
+        return f"Error: Input file '{shopify_file}' not found. Please check the file path.", None, None
     
     try:
         # Read and clean Shopify orders
@@ -306,7 +306,6 @@ def convert_shopify_to_singpost(shopify_file, output_file):
         # Create Google Slides with shipping labels for Singapore orders
         slides_url = None
         pdf_path = None
-        debug_log = None
         
         if sg_order_details:
             # Check if Google Credentials and Template URL are set
@@ -315,13 +314,8 @@ def convert_shopify_to_singpost(shopify_file, output_file):
             
             if credentials_path and os.path.exists(credentials_path):
                 try:
-                    # Make sure template_url is valid before extracting ID
-                    template_id = None
-                    if template_url and isinstance(template_url, str):
-                        template_id = get_template_id_from_url(template_url)
-                    
-                    # Call the updated create_shipping_slides function
-                    slides_url, pdf_path, debug_log = create_shipping_slides(sg_order_details, credentials_path, template_id)
+                    template_id = get_template_id_from_url(template_url) if template_url else None
+                    slides_url, pdf_path = create_shipping_slides(sg_order_details, credentials_path, template_id)
                     
                     # Add information about Google Slides
                     if slides_url:
@@ -335,15 +329,15 @@ def convert_shopify_to_singpost(shopify_file, output_file):
                 summary += "\n\nSkipped Google Slides creation - credentials not found"
                 print(f"Skipped Google Slides - Credentials path not found or invalid: {credentials_path}")
         
-        return summary, pdf_path, slides_url, debug_log
+        return summary, pdf_path, slides_url
         
     except Exception as e:
-        # Return a tuple with error message and None values
+        # Return a tuple with error message and None values for pdf_path and slides_url
         error_message = f"Error processing orders: {str(e)}"
         print(error_message)  # Log the error
         import traceback
         traceback.print_exc()  # Print full traceback for debugging
-        return error_message, None, None, None
+        return error_message, None, None
     
 def print_region_breakdown(region_name, product_counter, order_details):
     output = f"\n\n{region_name}:"
@@ -392,5 +386,7 @@ def print_region_breakdown(region_name, product_counter, order_details):
     
     output += f"\n\nTotal {region_name} orders: {len(order_details)}"
     output += f"\nTotal {region_name} pieces: {total_pieces}"
+    
+    
     
     return output
