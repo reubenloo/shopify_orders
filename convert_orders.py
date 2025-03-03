@@ -315,7 +315,12 @@ def convert_shopify_to_singpost(shopify_file, output_file):
             
             if credentials_path and os.path.exists(credentials_path):
                 try:
-                    template_id = get_template_id_from_url(template_url) if template_url else None
+                    # Make sure template_url is valid before extracting ID
+                    template_id = None
+                    if template_url and isinstance(template_url, str):
+                        template_id = get_template_id_from_url(template_url)
+                    
+                    # Call the updated create_shipping_slides function
                     slides_url, pdf_path, debug_log = create_shipping_slides(sg_order_details, credentials_path, template_id)
                     
                     # Add information about Google Slides
@@ -333,7 +338,7 @@ def convert_shopify_to_singpost(shopify_file, output_file):
         return summary, pdf_path, slides_url, debug_log
         
     except Exception as e:
-        # Return a tuple with error message and None values for pdf_path and slides_url
+        # Return a tuple with error message and None values
         error_message = f"Error processing orders: {str(e)}"
         print(error_message)  # Log the error
         import traceback
@@ -387,7 +392,5 @@ def print_region_breakdown(region_name, product_counter, order_details):
     
     output += f"\n\nTotal {region_name} orders: {len(order_details)}"
     output += f"\nTotal {region_name} pieces: {total_pieces}"
-    
-    
     
     return output

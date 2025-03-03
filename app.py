@@ -558,7 +558,7 @@ with st.sidebar:
     template_url_from_secrets = False
     if hasattr(st, 'secrets') and 'google_slides_template' in st.secrets:
         template_url = st.secrets['google_slides_template']
-        if template_url and template_url.startswith("https://docs.google.com/presentation"):
+        if template_url and isinstance(template_url, str) and template_url.startswith("https://docs.google.com/presentation"):
             os.environ['SLIDES_TEMPLATE_URL'] = template_url
             st.success("Template URL loaded from Streamlit secrets!")
             template_url_from_secrets = True
@@ -572,7 +572,7 @@ with st.sidebar:
             help="URL of a Google Slides template that has been shared with your service account"
         )
         
-        if template_url and template_url.startswith("https://docs.google.com/presentation"):
+        if template_url and isinstance(template_url, str) and template_url.startswith("https://docs.google.com/presentation"):
             os.environ['SLIDES_TEMPLATE_URL'] = template_url
             st.success("Template URL saved!")
     
@@ -647,7 +647,7 @@ if uploaded_file:
             if 'SLIDES_TEMPLATE_URL' in os.environ and 'credentials_path' in st.session_state:
                 template_url = os.environ['SLIDES_TEMPLATE_URL']
                 template_id = None
-                if template_url:
+                if template_url and isinstance(template_url, str):
                     match = re.search(r'/d/([a-zA-Z0-9-_]+)', template_url)
                     if match:
                         template_id = match.group(1)
