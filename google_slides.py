@@ -17,7 +17,7 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
         template_id: ID of the existing presentation to edit
         
     Returns:
-        tuple: (presentation_url, pdf_path) URL of the edited presentation and path to PDF
+        tuple: (presentation_url, pdf_path, debug_log) URL of the edited presentation, path to PDF, and debug log
     """
     debug_log = []
     
@@ -51,10 +51,10 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
                         log_debug("Credentials file contains all required fields")
                 except json.JSONDecodeError as e:
                     log_debug(f"ERROR: Credentials file is not valid JSON: {str(e)}")
-                    return None, None
+                    return None, None, "\n".join(debug_log)
         except Exception as e:
             log_debug(f"ERROR: Could not read credentials file: {str(e)}")
-            return None, None
+            return None, None, "\n".join(debug_log)
         
         # Set up credentials with detailed error handling
         SCOPES = ['https://www.googleapis.com/auth/presentations', 
@@ -69,7 +69,7 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
             log_debug(f"ERROR creating credentials: {str(e)}")
             import traceback
             log_debug(traceback.format_exc())
-            return None, None
+            return None, None, "\n".join(debug_log)
         
         # Create services with detailed error handling
         try:
@@ -82,7 +82,7 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
             log_debug(f"ERROR building services: {str(e)}")
             import traceback
             log_debug(traceback.format_exc())
-            return None, None
+            return None, None, "\n".join(debug_log)
         
         # Use the existing presentation if template_id is provided
         presentation_id = None
@@ -90,20 +90,11 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
         
         try:
             if template_id:
-                log_debug(f"Using existing presentation: {template_id}")
-                
-                # Make a copy of the template for this session
-                copy_title = f"Shipping Labels - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                drive_response = drive_service.files().copy(
-                    fileId=template_id,
-                    body={"name": copy_title}
-                ).execute()
-                
-                presentation_id = drive_response.get('id')
-                log_debug(f"Created copy of template with ID: {presentation_id}")
+                log_debug(f"Using existing presentation with ID: {template_id}")
+                presentation_id = template_id
             else:
                 log_debug("No template ID provided, cannot proceed")
-                return None, None
+                return None, None, "\n".join(debug_log)
                 
             presentation_url = f"https://docs.google.com/presentation/d/{presentation_id}/edit"
             log_debug(f"Presentation URL: {presentation_url}")
@@ -111,7 +102,7 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
             log_debug(f"ERROR accessing presentation: {str(e)}")
             import traceback
             log_debug(traceback.format_exc())
-            return None, None
+            return None, None, "\n".join(debug_log)
         
         # Get current presentation details to understand slide layout
         try:
@@ -127,7 +118,7 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
             # Ensure we have at least 2 slides (first for date, second for template)
             if len(slides) < 2:
                 log_debug("ERROR: Template presentation should have at least 2 slides")
-                return presentation_url, None
+                return presentation_url, None, "\n".join(debug_log)
                 
             # Save the date slide and template slide
             date_slide_id = slides[0].get('objectId')
@@ -158,7 +149,7 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
             # Update the date on the new slide
             update_date_slide(slides_service, presentation_id, new_date_slide_id, log_debug)
             
-            # Move the new date slide to the beginning
+            # Move the new date slide to the beginning (position 0)
             move_date_request = [{
                 'updateSlidesPosition': {
                     'slideObjectIds': [new_date_slide_id],
@@ -170,7 +161,7 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
                 presentationId=presentation_id,
                 body={'requests': move_date_request}
             ).execute()
-            log_debug("Moved date slide to the beginning")
+            log_debug("Moved new date slide to the beginning")
             
             # Create order slides
             new_order_slide_ids = []
@@ -201,7 +192,8 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
                 # Update the order details on this slide
                 update_order_slide(slides_service, presentation_id, new_slide_id, order, log_debug)
             
-            # Move all the new order slides after the date slide
+            # Move all the new order slides after the date slide (starting at position 1)
+            log_debug(f"Moving {len(new_order_slide_ids)} order slides to positions after the date slide")
             for i, slide_id in enumerate(new_order_slide_ids):
                 move_request = [{
                     'updateSlidesPosition': {
@@ -214,17 +206,21 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
                     presentationId=presentation_id,
                     body={'requests': move_request}
                 ).execute()
+                log_debug(f"Moved order slide {i+1} to position {i+1}")
                 
             log_debug(f"Successfully repositioned {len(new_order_slide_ids)} order slides")
             
             # Save debug log to a file
-            with open("google_slides_debug.log", "w") as f:
-                f.write("\n".join(debug_log))
+            try:
+                with open("google_slides_debug.log", "w") as f:
+                    f.write("\n".join(debug_log))
+            except Exception as e:
+                log_debug(f"Could not save debug log to file: {str(e)}")
             
             # No PDF generation in this version
             pdf_path = None
             
-            return presentation_url, pdf_path
+            return presentation_url, pdf_path, "\n".join(debug_log)
             
         except Exception as e:
             log_debug(f"ERROR in slide creation: {str(e)}")
@@ -232,10 +228,13 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
             log_debug(traceback.format_exc())
             
             # Save debug log to a file even on error
-            with open("google_slides_debug.log", "w") as f:
-                f.write("\n".join(debug_log))
+            try:
+                with open("google_slides_debug.log", "w") as f:
+                    f.write("\n".join(debug_log))
+            except Exception as log_e:
+                log_debug(f"Could not save debug log to file: {str(log_e)}")
                 
-            return presentation_url, None
+            return presentation_url, None, "\n".join(debug_log)
         
     except Exception as e:
         print(f"ERROR in create_shipping_slides: {str(e)}")
@@ -249,7 +248,7 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
         except:
             pass
             
-        return None, None
+        return None, None, "\n".join(debug_log)
 
 def analyze_slide_structure(slides_service, presentation_id, slide, log_debug):
     """
@@ -550,6 +549,7 @@ def update_slide_tables(slides_service, presentation_id, slide_id, slide, order,
                     tables_updated = True
                 except Exception as e:
                     log_debug(f"Error updating table cells: {str(e)}")
+                    log_debug(traceback.format_exc())
             else:
                 log_debug("No table cell update requests were created")
             
@@ -628,6 +628,7 @@ def update_slide_shapes(slides_service, presentation_id, slide_id, slide, order,
                     shapes_updated += 1
                 except Exception as e:
                     log_debug(f"Error updating shape: {str(e)}")
+                    log_debug(traceback.format_exc())
     
     log_debug(f"Updated {shapes_updated} shapes on the slide")
 
