@@ -159,6 +159,7 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
                         }, {
                             'insertText': {
                                 'objectId': element_id,
+                                'insertionIndex': 0,  # FIX: added insertionIndex
                                 'text': today
                             }
                         }]
@@ -319,6 +320,7 @@ def update_order_details(slides_service, presentation_id, slide_id, order):
                     }, {
                         'insertText': {
                             'objectId': element_id,
+                            'insertionIndex': 0,  # FIX: added insertionIndex
                             'text': new_text
                         }
                     }])
@@ -338,6 +340,7 @@ def update_order_details(slides_service, presentation_id, slide_id, order):
                     }, {
                         'insertText': {
                             'objectId': element_id,
+                            'insertionIndex': 0,  # FIX: added insertionIndex
                             'text': new_text
                         }
                     }])
@@ -365,6 +368,7 @@ def update_order_details(slides_service, presentation_id, slide_id, order):
                     }, {
                         'insertText': {
                             'objectId': element_id,
+                            'insertionIndex': 0,  # FIX: added insertionIndex
                             'text': new_text
                         }
                     }])
@@ -384,6 +388,7 @@ def update_order_details(slides_service, presentation_id, slide_id, order):
                     }, {
                         'insertText': {
                             'objectId': element_id,
+                            'insertionIndex': 0,  # FIX: added insertionIndex
                             'text': new_text
                         }
                     }])
@@ -407,6 +412,7 @@ def update_order_details(slides_service, presentation_id, slide_id, order):
                     }, {
                         'insertText': {
                             'objectId': element_id,
+                            'insertionIndex': 0,  # FIX: added insertionIndex
                             'text': new_text
                         }
                     }])
