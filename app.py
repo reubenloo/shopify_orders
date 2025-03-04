@@ -558,7 +558,7 @@ with st.sidebar:
     template_url_from_secrets = False
     if hasattr(st, 'secrets') and 'google_slides_template' in st.secrets:
         template_url = st.secrets['google_slides_template']
-        if template_url and template_url.startswith("https://docs.google.com/presentation"):
+        if template_url and isinstance(template_url, str) and template_url.startswith("https://docs.google.com/presentation"):
             os.environ['SLIDES_TEMPLATE_URL'] = template_url
             st.success("Template URL loaded from Streamlit secrets!")
             template_url_from_secrets = True
