@@ -201,11 +201,11 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
                 ).execute()
                 print(f"Positioned order slide at index {insert_index}")
                 
-                # Wait briefly for the slide to be fully created
+                # Wait briefly to ensure the slide is fully created
                 time.sleep(0.5)
                 
-                # Now update the order details on this slide
-                direct_update_text_on_slide(slides_service, presentation_id, new_slide_id, order)
+                # Now update the order details on this slide with a specialized approach for table-based slides
+                update_table_based_slide(slides_service, presentation_id, new_slide_id, order)
                 
                 # Increment the insertion index for the next slide
                 insert_index += 1
@@ -334,9 +334,9 @@ def update_date_slide(slides_service, presentation_id, slide_id):
         import traceback
         traceback.print_exc()
 
-def direct_update_text_on_slide(slides_service, presentation_id, slide_id, order):
+def update_table_based_slide(slides_service, presentation_id, slide_id, order):
     """
-    A simplified approach to update text on a slide without relying on table cells
+    Specialized function to update text in a table-based slide format
     
     Args:
         slides_service: Google Slides API service
@@ -345,39 +345,13 @@ def direct_update_text_on_slide(slides_service, presentation_id, slide_id, order
         order: Dictionary containing order information
     """
     try:
-        print(f"Directly updating text on slide {slide_id} for order: {order.get('order_number', 'unknown')}")
+        print(f"Updating table-based slide {slide_id} for order: {order.get('order_number', 'unknown')}")
         
         # Get the slide structure
         slide = slides_service.presentations().pages().get(
             presentationId=presentation_id,
             pageObjectId=slide_id
         ).execute()
-        
-        # Extract all shape text elements from the slide
-        elements_info = []
-        for element in slide.get('pageElements', []):
-            if 'shape' in element and 'text' in element.get('shape', {}):
-                element_id = element.get('objectId')
-                
-                # Extract text content for this shape
-                text_content = ""
-                for text_element in element.get('shape', {}).get('text', {}).get('textElements', []):
-                    if 'textRun' in text_element:
-                        text_content += text_element.get('textRun', {}).get('content', '')
-                
-                # Get position for sorting
-                y_pos = element.get('transform', {}).get('translateY', 0)
-                x_pos = element.get('transform', {}).get('translateX', 0)
-                
-                # Save element info
-                elements_info.append({
-                    'id': element_id,
-                    'text': text_content,
-                    'y': y_pos,
-                    'x': x_pos
-                })
-                
-                print(f"Found text element: ID={element_id}, Content=\"{text_content.strip()}\", X={x_pos}, Y={y_pos}")
         
         # Prepare order information
         quantity = "2" if order.get('is_bundle', False) else "1"
@@ -395,216 +369,192 @@ def direct_update_text_on_slide(slides_service, presentation_id, slide_id, order
         address2 = order.get('address2', '')
         address = f"{address1}\n{address2}" if address2 and address2.strip() else address1
         
-        # Define fields to look for
-        fields_to_update = [
-            {
-                'patterns': ['NAME:', 'NAME #'],  # Text to match for name field
-                'content': f"Name: #{order.get('order_number', '').replace('#', '')} {order.get('name', '')}"
-            },
-            {
-                'patterns': ['CONTACT:'],  # Text to match for contact field
-                'content': f"Contact: {order.get('phone', '')}"
-            },
-            {
-                'patterns': ['DELIVERY ADDRESS:', 'DELIVERY ADDRESS'],  # Text to match for address field
-                'content': f"Delivery Address: {address}"
-            },
-            {
-                'patterns': ['POSTAL:'],  # Text to match for postal field
-                'content': f"Postal: {order.get('postal', '')}"
-            },
-            {
-                'patterns': ['ITEM:'],  # Text to match for item field
-                'content': f"Item: {quantity} {size_display} {material} Eczema Mitten"
-            }
-        ]
-        
-        # Strategy 1: Try to match fields by their text content
-        update_requests = []
-        matched_elements = set()
-        
-        for field in fields_to_update:
-            for pattern in field['patterns']:
-                for element in elements_info:
-                    if element['id'] not in matched_elements and pattern in element['text'].upper():
-                        print(f"Found match for '{pattern}' in element: {element['id']}")
-                        matched_elements.add(element['id'])
+        # Get all text elements on the slide
+        all_text_elements = []
+        for element in slide.get('pageElements', []):
+            # Check for shapes with text
+            if 'shape' in element and 'text' in element.get('shape', {}):
+                shape_id = element.get('objectId')
+                text_content = ""
+                for text_element in element.get('shape', {}).get('text', {}).get('textElements', []):
+                    if 'textRun' in text_element:
+                        text_content += text_element.get('textRun', {}).get('content', '')
+                
+                all_text_elements.append({
+                    'id': shape_id,
+                    'type': 'shape',
+                    'text': text_content.strip(),
+                    'x': element.get('transform', {}).get('translateX', 0),
+                    'y': element.get('transform', {}).get('translateY', 0)
+                })
+                print(f"Found shape text: {shape_id} at ({element.get('transform', {}).get('translateX', 0)}, {element.get('transform', {}).get('translateY', 0)}): \"{text_content.strip()}\"")
+            
+            # Check for table cells with text
+            elif 'table' in element:
+                table = element.get('table')
+                table_id = element.get('objectId')
+                print(f"Found table: {table_id} with {len(table.get('tableRows', []))} rows, {len(table.get('tableRows', [])[0].get('tableCells', []) if table.get('tableRows') else [])} columns")
+                
+                for row_idx, row in enumerate(table.get('tableRows', [])):
+                    for col_idx, cell in enumerate(row.get('tableCells', [])):
+                        cell_text = ""
+                        cell_object_id = cell.get('objectId')
                         
-                        # Create update request
-                        update_requests.extend([
-                            {
-                                'deleteText': {
-                                    'objectId': element['id'],
-                                    'textRange': {
-                                        'type': 'ALL'
-                                    }
-                                }
-                            },
-                            {
-                                'insertText': {
-                                    'objectId': element['id'],
-                                    'insertionIndex': 0,
-                                    'text': field['content']
-                                }
-                            }
-                        ])
-                        break  # Move to next field
+                        # Extract text from this cell
+                        if 'text' in cell:
+                            for text_element in cell.get('text', {}).get('textElements', []):
+                                if 'textRun' in text_element:
+                                    cell_text += text_element.get('textRun', {}).get('content', '')
+                        
+                        all_text_elements.append({
+                            'id': cell_object_id,
+                            'type': 'table_cell',
+                            'table_id': table_id,
+                            'row': row_idx,
+                            'col': col_idx,
+                            'text': cell_text.strip()
+                        })
+                        print(f"Found table cell: {cell_object_id} at row={row_idx}, col={col_idx}: \"{cell_text.strip()}\"")
         
-        # Strategy 2: If we didn't match all fields, try by position (left side of slide)
-        if len(matched_elements) < len(fields_to_update):
-            print(f"Only matched {len(matched_elements)} fields using text matching. Trying position-based matching.")
-            
-            # Filter to only include elements on the left side (customer info side)
-            left_elements = [e for e in elements_info if e['id'] not in matched_elements and e['x'] < 200]
-            
-            # Sort by vertical position
-            left_elements.sort(key=lambda e: e['y'])
-            
-            # Try to match remaining fields
-            remaining_fields = [f for f in fields_to_update if not any(p in [e['text'].upper() for e in elements_info if e['id'] in matched_elements] for p in f['patterns'])]
-            
-            print(f"Found {len(left_elements)} left-side elements for {len(remaining_fields)} remaining fields")
-            
-            for i, field in enumerate(remaining_fields):
-                if i < len(left_elements):
-                    element = left_elements[i]
-                    print(f"Position-based match: Field '{field['patterns'][0]}' -> Element {element['id']}")
-                    matched_elements.add(element['id'])
-                    
-                    update_requests.extend([
-                        {
-                            'deleteText': {
-                                'objectId': element['id'],
-                                'textRange': {
-                                    'type': 'ALL'
-                                }
-                            }
-                        },
-                        {
-                            'insertText': {
-                                'objectId': element['id'],
-                                'insertionIndex': 0,
-                                'text': field['content']
-                            }
-                        }
-                    ])
+        # First try to find elements based on exact row/column positions
+        left_side_elements = []
+        name_element = next((e for e in all_text_elements if e['type'] == 'table_cell' and e['row'] == 1 and e['col'] == 0), None)
+        contact_element = next((e for e in all_text_elements if e['type'] == 'table_cell' and e['row'] == 2 and e['col'] == 0), None)
+        address_element = next((e for e in all_text_elements if e['type'] == 'table_cell' and e['row'] == 3 and e['col'] == 0), None)
+        postal_element = next((e for e in all_text_elements if e['type'] == 'table_cell' and e['row'] == 4 and e['col'] == 0), None)
+        item_element = next((e for e in all_text_elements if e['type'] == 'table_cell' and e['row'] == 5 and e['col'] == 0), None)
         
-        # Strategy 3: Last resort - find all editable text elements
-        if len(matched_elements) < len(fields_to_update):
-            print("Some fields still not matched. Attempting direct field creation.")
-            
-            # Create direct field updates
-            create_text_requests = []
-            
-            # Fixed positions for new text boxes
-            positions = [
-                {'x': 50, 'y': 100},  # Name
-                {'x': 50, 'y': 130},  # Contact
-                {'x': 50, 'y': 160},  # Address
-                {'x': 50, 'y': 190},  # Postal
-                {'x': 50, 'y': 220}   # Item
-            ]
-            
-            for i, field in enumerate(fields_to_update):
-                if i < len(positions) and not any(p in [e['text'].upper() for e in elements_info if e['id'] in matched_elements] for p in field['patterns']):
-                    print(f"Creating new text box for field: {field['patterns'][0]}")
-                    
-                    # Generate a unique element ID
-                    element_id = f'customText_{slide_id}_{i}'
-                    
-                    # Create a new text box
-                    create_text_requests.append({
-                        'createShape': {
-                            'objectId': element_id,
-                            'shapeType': 'TEXT_BOX',
-                            'elementProperties': {
-                                'pageObjectId': slide_id,
-                                'size': {
-                                    'width': {'magnitude': 350, 'unit': 'PT'},
-                                    'height': {'magnitude': 30, 'unit': 'PT'}
-                                },
-                                'transform': {
-                                    'scaleX': 1,
-                                    'scaleY': 1,
-                                    'translateX': positions[i]['x'],
-                                    'translateY': positions[i]['y'],
-                                    'unit': 'PT'
-                                }
-                            }
-                        }
-                    })
-                    
-                    # Add text to the text box
-                    create_text_requests.append({
-                        'insertText': {
-                            'objectId': element_id,
-                            'insertionIndex': 0,
-                            'text': field['content']
-                        }
-                    })
-                    
-                    # Style the text
-                    create_text_requests.append({
-                        'updateTextStyle': {
-                            'objectId': element_id,
+        # If we couldn't find elements by position, try by content
+        if not name_element:
+            name_element = next((e for e in all_text_elements if "NAME:" in e['text'].upper() or "NAME #" in e['text'].upper()), None)
+        if not contact_element:
+            contact_element = next((e for e in all_text_elements if "CONTACT:" in e['text'].upper() and "ECZEMA" not in e['text'].upper()), None)
+        if not address_element:
+            address_element = next((e for e in all_text_elements if "DELIVERY ADDRESS:" in e['text'].upper()), None)
+        if not postal_element:
+            postal_element = next((e for e in all_text_elements if "POSTAL:" in e['text'].upper() and "680235" not in e['text'].upper()), None)
+        if not item_element:
+            item_element = next((e for e in all_text_elements if "ITEM:" in e['text'].upper()), None)
+        
+        # Try a third approach - identify all text elements on the left side
+        left_side_threshold = 200  # Adjust based on your template
+        left_side_elements = [e for e in all_text_elements if e['type'] == 'shape' and e['x'] < left_side_threshold]
+        left_side_elements.sort(key=lambda e: e['y'])  # Sort by vertical position
+        
+        # Prepare update requests
+        update_requests = []
+        
+        # Function to add update request for an element if it exists
+        def add_update_for_element(element, content):
+            if element and element.get('id'):
+                print(f"Adding update for element {element['id']} with content: \"{content}\"")
+                update_requests.extend([
+                    {
+                        'deleteText': {
+                            'objectId': element['id'],
                             'textRange': {
                                 'type': 'ALL'
-                            },
-                            'style': {
-                                'bold': True,
-                                'fontSize': {
-                                    'magnitude': 12,
-                                    'unit': 'PT'
-                                }
-                            },
-                            'fields': 'bold,fontSize'
+                            }
                         }
-                    })
-            
-            # Execute create requests if needed
-            if create_text_requests:
-                try:
-                    print(f"Executing {len(create_text_requests)} create text requests")
-                    slides_service.presentations().batchUpdate(
-                        presentationId=presentation_id,
-                        body={'requests': create_text_requests}
-                    ).execute()
-                    print("Successfully created new text elements")
-                except Exception as e:
-                    print(f"Warning: Failed to create new text elements: {str(e)}")
+                    },
+                    {
+                        'insertText': {
+                            'objectId': element['id'],
+                            'insertionIndex': 0,
+                            'text': content
+                        }
+                    }
+                ])
+                return True
+            return False
         
-        # Execute update requests
+        # Try to update elements with specific content
+        updated_name = add_update_for_element(name_element, f"Name: #{order.get('order_number', '').replace('#', '')} {order.get('name', '')}")
+        updated_contact = add_update_for_element(contact_element, f"Contact: {order.get('phone', '')}")
+        updated_address = add_update_for_element(address_element, f"Delivery Address: {address}")
+        updated_postal = add_update_for_element(postal_element, f"Postal: {order.get('postal', '')}")
+        updated_item = add_update_for_element(item_element, f"Item: {quantity} {size_display} {material} Eczema Mitten")
+        
+        # If we couldn't find specific elements, try using left side elements by position
+        if len(left_side_elements) >= 5:
+            if not updated_name and len(left_side_elements) > 0:
+                add_update_for_element(left_side_elements[0], f"Name: #{order.get('order_number', '').replace('#', '')} {order.get('name', '')}")
+            if not updated_contact and len(left_side_elements) > 1:
+                add_update_for_element(left_side_elements[1], f"Contact: {order.get('phone', '')}")
+            if not updated_address and len(left_side_elements) > 2:
+                add_update_for_element(left_side_elements[2], f"Delivery Address: {address}")
+            if not updated_postal and len(left_side_elements) > 3:
+                add_update_for_element(left_side_elements[3], f"Postal: {order.get('postal', '')}")
+            if not updated_item and len(left_side_elements) > 4:
+                add_update_for_element(left_side_elements[4], f"Item: {quantity} {size_display} {material} Eczema Mitten")
+        
+        # Execute updates
         if update_requests:
+            print(f"Executing {len(update_requests)} update requests")
             try:
-                print(f"Executing {len(update_requests)} update requests")
                 slides_service.presentations().batchUpdate(
                     presentationId=presentation_id,
                     body={'requests': update_requests}
                 ).execute()
-                print("Successfully executed text updates")
+                print("Successfully executed updates")
             except Exception as e:
-                print(f"Warning: Failed to update text: {str(e)}")
-                import traceback
-                traceback.print_exc()
+                print(f"WARNING: Error executing batch update: {str(e)}")
                 
-                # If the update failed, try a simpler approach with one request at a time
-                print("Trying individual updates as fallback...")
+                # Try updating one pair at a time
+                print("Trying individual updates...")
                 for i in range(0, len(update_requests), 2):
                     if i+1 < len(update_requests):
                         try:
-                            # Execute a delete+insert pair
                             slides_service.presentations().batchUpdate(
                                 presentationId=presentation_id,
                                 body={'requests': [update_requests[i], update_requests[i+1]]}
                             ).execute()
-                            print(f"Successfully updated field {i//2 + 1}")
+                            print(f"Successfully updated pair {i//2 + 1}")
                         except Exception as e2:
-                            print(f"Failed to update field {i//2 + 1}: {str(e2)}")
+                            print(f"Failed to update pair {i//2 + 1}: {str(e2)}")
         else:
-            print("WARNING: No update requests were generated")
+            print("WARNING: No updates prepared for this slide - no suitable elements found")
+            
+            # If we couldn't find any elements to update, try creating a text note about it
+            # This creates a visible notice on the slide that something went wrong
+            try:
+                note_requests = [{
+                    'createShape': {
+                        'objectId': f'note_{slide_id}',
+                        'shapeType': 'TEXT_BOX',
+                        'elementProperties': {
+                            'pageObjectId': slide_id,
+                            'size': {
+                                'width': {'magnitude': 300, 'unit': 'PT'},
+                                'height': {'magnitude': 50, 'unit': 'PT'}
+                            },
+                            'transform': {
+                                'scaleX': 1,
+                                'scaleY': 1,
+                                'translateX': 50,
+                                'translateY': 50,
+                                'unit': 'PT'
+                            }
+                        }
+                    }
+                }, {
+                    'insertText': {
+                        'objectId': f'note_{slide_id}',
+                        'insertionIndex': 0,
+                        'text': f"Order #{order.get('order_number', '').replace('#', '')}: {order.get('name', '')}\nContact: {order.get('phone', '')}\nItem: {quantity} {size_display} {material}"
+                    }
+                }]
+                
+                slides_service.presentations().batchUpdate(
+                    presentationId=presentation_id,
+                    body={'requests': note_requests}
+                ).execute()
+                print("Created fallback note with order information")
+            except Exception as note_err:
+                print(f"Failed to create fallback note: {str(note_err)}")
     
     except Exception as e:
-        print(f"ERROR in direct_update_text_on_slide: {str(e)}")
+        print(f"ERROR updating table-based slide: {str(e)}")
         import traceback
         traceback.print_exc()
 
@@ -618,20 +568,21 @@ def get_template_id_from_url(url):
         return match.group(1)
     return None
 
-# Legacy function for backward compatibility - no longer used
+# Legacy functions for backward compatibility
 def update_order_details(slides_service, presentation_id, slide_id, order):
-    """Legacy function that's kept for backward compatibility but replaced by direct_update_text_on_slide"""
-    # This is now just a wrapper around the new function
-    return direct_update_text_on_slide(slides_service, presentation_id, slide_id, order)
+    """Legacy function that redirects to the new table-based approach"""
+    return update_table_based_slide(slides_service, presentation_id, slide_id, order)
 
-# Legacy function for backward compatibility - no longer used
 def find_table_cells(slides_service, presentation_id, slide_id):
     """Legacy function - kept for backward compatibility but no longer used"""
     print("Warning: find_table_cells is deprecated and will not work properly")
     return {}
 
-# Legacy function for backward compatibility - no longer used
 def update_text_fields(slides_service, presentation_id, text_fields, order):
     """Legacy function - kept for backward compatibility but no longer used"""
     print("Warning: update_text_fields is deprecated and will not work properly")
     return
+
+def direct_update_text_on_slide(slides_service, presentation_id, slide_id, order):
+    """Legacy function that redirects to the new table-based approach"""
+    return update_table_based_slide(slides_service, presentation_id, slide_id, order)
