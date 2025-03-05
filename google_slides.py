@@ -204,8 +204,8 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
                 # Wait briefly to ensure the slide is fully created
                 time.sleep(0.5)
                 
-                # Now update the order details on this slide with a specialized approach for table-based slides
-                update_table_based_slide(slides_service, presentation_id, new_slide_id, order)
+                # Now update the order details on this slide using placeholder replacement
+                update_slide_with_placeholders(slides_service, presentation_id, new_slide_id, order)
                 
                 # Increment the insertion index for the next slide
                 insert_index += 1
@@ -334,9 +334,9 @@ def update_date_slide(slides_service, presentation_id, slide_id):
         import traceback
         traceback.print_exc()
 
-def update_table_based_slide(slides_service, presentation_id, slide_id, order):
+def update_slide_with_placeholders(slides_service, presentation_id, slide_id, order):
     """
-    Specialized function to update text in a table-based slide format
+    Update a slide using placeholder text replacement
     
     Args:
         slides_service: Google Slides API service
@@ -345,13 +345,7 @@ def update_table_based_slide(slides_service, presentation_id, slide_id, order):
         order: Dictionary containing order information
     """
     try:
-        print(f"Updating table-based slide {slide_id} for order: {order.get('order_number', 'unknown')}")
-        
-        # Get the slide structure
-        slide = slides_service.presentations().pages().get(
-            presentationId=presentation_id,
-            pageObjectId=slide_id
-        ).execute()
+        print(f"Updating slide {slide_id} with placeholder replacements for order: {order.get('order_number', 'unknown')}")
         
         # Prepare order information
         quantity = "2" if order.get('is_bundle', False) else "1"
@@ -369,192 +363,85 @@ def update_table_based_slide(slides_service, presentation_id, slide_id, order):
         address2 = order.get('address2', '')
         address = f"{address1}\n{address2}" if address2 and address2.strip() else address1
         
-        # Get all text elements on the slide
-        all_text_elements = []
-        for element in slide.get('pageElements', []):
-            # Check for shapes with text
-            if 'shape' in element and 'text' in element.get('shape', {}):
-                shape_id = element.get('objectId')
-                text_content = ""
-                for text_element in element.get('shape', {}).get('text', {}).get('textElements', []):
-                    if 'textRun' in text_element:
-                        text_content += text_element.get('textRun', {}).get('content', '')
-                
-                all_text_elements.append({
-                    'id': shape_id,
-                    'type': 'shape',
-                    'text': text_content.strip(),
-                    'x': element.get('transform', {}).get('translateX', 0),
-                    'y': element.get('transform', {}).get('translateY', 0)
-                })
-                print(f"Found shape text: {shape_id} at ({element.get('transform', {}).get('translateX', 0)}, {element.get('transform', {}).get('translateY', 0)}): \"{text_content.strip()}\"")
-            
-            # Check for table cells with text
-            elif 'table' in element:
-                table = element.get('table')
-                table_id = element.get('objectId')
-                print(f"Found table: {table_id} with {len(table.get('tableRows', []))} rows, {len(table.get('tableRows', [])[0].get('tableCells', []) if table.get('tableRows') else [])} columns")
-                
-                for row_idx, row in enumerate(table.get('tableRows', [])):
-                    for col_idx, cell in enumerate(row.get('tableCells', [])):
-                        cell_text = ""
-                        cell_object_id = cell.get('objectId')
-                        
-                        # Extract text from this cell
-                        if 'text' in cell:
-                            for text_element in cell.get('text', {}).get('textElements', []):
-                                if 'textRun' in text_element:
-                                    cell_text += text_element.get('textRun', {}).get('content', '')
-                        
-                        all_text_elements.append({
-                            'id': cell_object_id,
-                            'type': 'table_cell',
-                            'table_id': table_id,
-                            'row': row_idx,
-                            'col': col_idx,
-                            'text': cell_text.strip()
-                        })
-                        print(f"Found table cell: {cell_object_id} at row={row_idx}, col={col_idx}: \"{cell_text.strip()}\"")
+        # Create replacements for placeholders
+        replacements = [
+            {
+                'find': '#ORDERNUM#',
+                'replace': f"#{order.get('order_number', '').replace('#', '')}"
+            },
+            {
+                'find': '#CUSTOMERNAME#',
+                'replace': order.get('name', '')
+            },
+            {
+                'find': '#PHONE#',
+                'replace': order.get('phone', '')
+            },
+            {
+                'find': '#ADDRESS#',
+                'replace': address
+            },
+            {
+                'find': '#POSTALCODE#',
+                'replace': order.get('postal', '')
+            },
+            {
+                'find': '#QUANTITY#',
+                'replace': quantity
+            },
+            {
+                'find': '#SIZE#',
+                'replace': size_display
+            },
+            {
+                'find': '#MATERIAL#',
+                'replace': material
+            }
+        ]
         
-        # First try to find elements based on exact row/column positions
-        left_side_elements = []
-        name_element = next((e for e in all_text_elements if e['type'] == 'table_cell' and e['row'] == 1 and e['col'] == 0), None)
-        contact_element = next((e for e in all_text_elements if e['type'] == 'table_cell' and e['row'] == 2 and e['col'] == 0), None)
-        address_element = next((e for e in all_text_elements if e['type'] == 'table_cell' and e['row'] == 3 and e['col'] == 0), None)
-        postal_element = next((e for e in all_text_elements if e['type'] == 'table_cell' and e['row'] == 4 and e['col'] == 0), None)
-        item_element = next((e for e in all_text_elements if e['type'] == 'table_cell' and e['row'] == 5 and e['col'] == 0), None)
-        
-        # If we couldn't find elements by position, try by content
-        if not name_element:
-            name_element = next((e for e in all_text_elements if "NAME:" in e['text'].upper() or "NAME #" in e['text'].upper()), None)
-        if not contact_element:
-            contact_element = next((e for e in all_text_elements if "CONTACT:" in e['text'].upper() and "ECZEMA" not in e['text'].upper()), None)
-        if not address_element:
-            address_element = next((e for e in all_text_elements if "DELIVERY ADDRESS:" in e['text'].upper()), None)
-        if not postal_element:
-            postal_element = next((e for e in all_text_elements if "POSTAL:" in e['text'].upper() and "680235" not in e['text'].upper()), None)
-        if not item_element:
-            item_element = next((e for e in all_text_elements if "ITEM:" in e['text'].upper()), None)
-        
-        # Try a third approach - identify all text elements on the left side
-        left_side_threshold = 200  # Adjust based on your template
-        left_side_elements = [e for e in all_text_elements if e['type'] == 'shape' and e['x'] < left_side_threshold]
-        left_side_elements.sort(key=lambda e: e['y'])  # Sort by vertical position
-        
-        # Prepare update requests
-        update_requests = []
-        
-        # Function to add update request for an element if it exists
-        def add_update_for_element(element, content):
-            if element and element.get('id'):
-                print(f"Adding update for element {element['id']} with content: \"{content}\"")
-                update_requests.extend([
-                    {
-                        'deleteText': {
-                            'objectId': element['id'],
-                            'textRange': {
-                                'type': 'ALL'
-                            }
-                        }
+        # Create replacement requests
+        replace_requests = []
+        for replacement in replacements:
+            print(f"Creating replacement: '{replacement['find']}' -> '{replacement['replace']}'")
+            replace_requests.append({
+                'replaceAllText': {
+                    'containsText': {
+                        'text': replacement['find'],
+                        'matchCase': True
                     },
-                    {
-                        'insertText': {
-                            'objectId': element['id'],
-                            'insertionIndex': 0,
-                            'text': content
-                        }
-                    }
-                ])
-                return True
-            return False
+                    'replaceText': replacement['replace'],
+                    'pageObjectIds': [slide_id]
+                }
+            })
         
-        # Try to update elements with specific content
-        updated_name = add_update_for_element(name_element, f"Name: #{order.get('order_number', '').replace('#', '')} {order.get('name', '')}")
-        updated_contact = add_update_for_element(contact_element, f"Contact: {order.get('phone', '')}")
-        updated_address = add_update_for_element(address_element, f"Delivery Address: {address}")
-        updated_postal = add_update_for_element(postal_element, f"Postal: {order.get('postal', '')}")
-        updated_item = add_update_for_element(item_element, f"Item: {quantity} {size_display} {material} Eczema Mitten")
-        
-        # If we couldn't find specific elements, try using left side elements by position
-        if len(left_side_elements) >= 5:
-            if not updated_name and len(left_side_elements) > 0:
-                add_update_for_element(left_side_elements[0], f"Name: #{order.get('order_number', '').replace('#', '')} {order.get('name', '')}")
-            if not updated_contact and len(left_side_elements) > 1:
-                add_update_for_element(left_side_elements[1], f"Contact: {order.get('phone', '')}")
-            if not updated_address and len(left_side_elements) > 2:
-                add_update_for_element(left_side_elements[2], f"Delivery Address: {address}")
-            if not updated_postal and len(left_side_elements) > 3:
-                add_update_for_element(left_side_elements[3], f"Postal: {order.get('postal', '')}")
-            if not updated_item and len(left_side_elements) > 4:
-                add_update_for_element(left_side_elements[4], f"Item: {quantity} {size_display} {material} Eczema Mitten")
-        
-        # Execute updates
-        if update_requests:
-            print(f"Executing {len(update_requests)} update requests")
+        # Execute replacements
+        if replace_requests:
+            print(f"Executing {len(replace_requests)} replacement requests")
             try:
                 slides_service.presentations().batchUpdate(
                     presentationId=presentation_id,
-                    body={'requests': update_requests}
+                    body={'requests': replace_requests}
                 ).execute()
-                print("Successfully executed updates")
+                print("Successfully executed replacements")
             except Exception as e:
-                print(f"WARNING: Error executing batch update: {str(e)}")
+                print(f"WARNING: Error executing batch replacements: {str(e)}")
                 
-                # Try updating one pair at a time
-                print("Trying individual updates...")
-                for i in range(0, len(update_requests), 2):
-                    if i+1 < len(update_requests):
-                        try:
-                            slides_service.presentations().batchUpdate(
-                                presentationId=presentation_id,
-                                body={'requests': [update_requests[i], update_requests[i+1]]}
-                            ).execute()
-                            print(f"Successfully updated pair {i//2 + 1}")
-                        except Exception as e2:
-                            print(f"Failed to update pair {i//2 + 1}: {str(e2)}")
+                # Try replacing one at a time
+                print("Trying individual replacements...")
+                for i, req in enumerate(replace_requests):
+                    try:
+                        slides_service.presentations().batchUpdate(
+                            presentationId=presentation_id,
+                            body={'requests': [req]}
+                        ).execute()
+                        print(f"Successfully executed replacement {i+1}")
+                    except Exception as e2:
+                        print(f"Failed replacement {i+1}: {str(e2)}")
         else:
-            print("WARNING: No updates prepared for this slide - no suitable elements found")
-            
-            # If we couldn't find any elements to update, try creating a text note about it
-            # This creates a visible notice on the slide that something went wrong
-            try:
-                note_requests = [{
-                    'createShape': {
-                        'objectId': f'note_{slide_id}',
-                        'shapeType': 'TEXT_BOX',
-                        'elementProperties': {
-                            'pageObjectId': slide_id,
-                            'size': {
-                                'width': {'magnitude': 300, 'unit': 'PT'},
-                                'height': {'magnitude': 50, 'unit': 'PT'}
-                            },
-                            'transform': {
-                                'scaleX': 1,
-                                'scaleY': 1,
-                                'translateX': 50,
-                                'translateY': 50,
-                                'unit': 'PT'
-                            }
-                        }
-                    }
-                }, {
-                    'insertText': {
-                        'objectId': f'note_{slide_id}',
-                        'insertionIndex': 0,
-                        'text': f"Order #{order.get('order_number', '').replace('#', '')}: {order.get('name', '')}\nContact: {order.get('phone', '')}\nItem: {quantity} {size_display} {material}"
-                    }
-                }]
-                
-                slides_service.presentations().batchUpdate(
-                    presentationId=presentation_id,
-                    body={'requests': note_requests}
-                ).execute()
-                print("Created fallback note with order information")
-            except Exception as note_err:
-                print(f"Failed to create fallback note: {str(note_err)}")
+            print("WARNING: No replacement requests were created")
     
     except Exception as e:
-        print(f"ERROR updating table-based slide: {str(e)}")
+        print(f"ERROR updating slide with placeholders: {str(e)}")
         import traceback
         traceback.print_exc()
 
@@ -570,8 +457,8 @@ def get_template_id_from_url(url):
 
 # Legacy functions for backward compatibility
 def update_order_details(slides_service, presentation_id, slide_id, order):
-    """Legacy function that redirects to the new table-based approach"""
-    return update_table_based_slide(slides_service, presentation_id, slide_id, order)
+    """Legacy function that redirects to the new placeholder replacement approach"""
+    return update_slide_with_placeholders(slides_service, presentation_id, slide_id, order)
 
 def find_table_cells(slides_service, presentation_id, slide_id):
     """Legacy function - kept for backward compatibility but no longer used"""
@@ -584,5 +471,9 @@ def update_text_fields(slides_service, presentation_id, text_fields, order):
     return
 
 def direct_update_text_on_slide(slides_service, presentation_id, slide_id, order):
-    """Legacy function that redirects to the new table-based approach"""
-    return update_table_based_slide(slides_service, presentation_id, slide_id, order)
+    """Legacy function that redirects to the new placeholder replacement approach"""
+    return update_slide_with_placeholders(slides_service, presentation_id, slide_id, order)
+
+def update_table_based_slide(slides_service, presentation_id, slide_id, order):
+    """Legacy function that redirects to the new placeholder replacement approach"""
+    return update_slide_with_placeholders(slides_service, presentation_id, slide_id, order)
