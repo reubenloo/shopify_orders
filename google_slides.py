@@ -11,7 +11,7 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
     Args:
         order_details: List of dictionaries containing order information
         credentials_path: Path to the service account JSON credentials file
-        template_id: Optional ID of a template presentation to copy
+        template_id: Optional ID of a template presentation to use
         
     Returns:
         presentation_url: URL of the created/updated presentation
@@ -29,7 +29,6 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
         drive_service = build('drive', 'v3', credentials=credentials)
         
         # If template_id is provided, we'll directly modify that presentation
-        # instead of creating a new one
         if template_id:
             presentation_id = template_id
             presentation_url = f"https://docs.google.com/presentation/d/{presentation_id}/edit"
@@ -38,23 +37,6 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
             presentation = slides_service.presentations().get(
                 presentationId=presentation_id
             ).execute()
-            
-            # Check if template has at least one slide
-            if len(presentation.get('slides', [])) < 1:
-                # Create a blank slide if template is empty
-                slides_service.presentations().batchUpdate(
-                    presentationId=presentation_id,
-                    body={
-                        'requests': [{
-                            'createSlide': {
-                                'insertionIndex': 0,
-                                'slideLayoutReference': {
-                                    'predefinedLayout': 'BLANK'
-                                }
-                            }
-                        }]
-                    }
-                ).execute()
         else:
             # Create a new blank presentation if no template is provided
             presentation = {
@@ -62,107 +44,99 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
             }
             presentation = slides_service.presentations().create(body=presentation).execute()
             presentation_id = presentation.get('presentationId')
-            
-            # Create a blank slide
-            slides_service.presentations().batchUpdate(
-                presentationId=presentation_id,
-                body={
-                    'requests': [{
-                        'createSlide': {
-                            'slideLayoutReference': {
-                                'predefinedLayout': 'BLANK'
-                            }
-                        }
-                    }]
-                }
-            ).execute()
-            
             presentation_url = f"https://docs.google.com/presentation/d/{presentation_id}/edit"
         
-        # Get the current slides to determine deletion/updates
+        # Get the current slides
         presentation = slides_service.presentations().get(
             presentationId=presentation_id
         ).execute()
         
-        # Clear existing slides except the first one (template slide)
         slides = presentation.get('slides', [])
-        delete_requests = []
         
-        # Keep the first slide as a template, delete the rest
-        if len(slides) > 1:
-            for i in range(1, len(slides)):
-                delete_requests.append({
-                    'deleteObject': {
-                        'objectId': slides[i].get('objectId')
-                    }
-                })
-            
-        if delete_requests:
-            slides_service.presentations().batchUpdate(
-                presentationId=presentation_id,
-                body={'requests': delete_requests}
-            ).execute()
-            
-        # Get updated list of slides
-        presentation = slides_service.presentations().get(
-            presentationId=presentation_id
+        # Check if we have at least 2 slides (date slide and template slide)
+        if len(slides) < 2:
+            return None  # Not enough slides in the template
+        
+        # Get the template slide (2nd slide)
+        template_slide_id = slides[1].get('objectId')
+        
+        # Create a new date slide for this batch
+        current_date = datetime.now().strftime('%d %b, %Y')
+        
+        # Create a new date slide at the beginning
+        date_slide_request = {
+            'createSlide': {
+                'insertionIndex': 0,  # Insert at the beginning
+                'slideLayoutReference': {
+                    'predefinedLayout': 'TITLE_ONLY'
+                },
+                'placeholderIdMappings': [{
+                    'layoutPlaceholder': {
+                        'type': 'TITLE',
+                        'index': 0
+                    },
+                    'objectId': 'dateTitle'
+                }]
+            }
+        }
+        
+        # Create the date slide
+        date_slide_response = slides_service.presentations().batchUpdate(
+            presentationId=presentation_id,
+            body={'requests': [date_slide_request]}
         ).execute()
-        slides = presentation.get('slides', [])
         
-        # Use the first slide as a template
-        template_slide_id = slides[0].get('objectId') if slides else None
+        # Get the ID of the new date slide
+        new_date_slide_id = date_slide_response.get('replies', [{}])[0].get('createSlide', {}).get('objectId')
         
-        # Process each order - either updating template or creating new slides
-        requests = []
-        
-        # Create a table layout on the template slide if needed
-        if len(slides) > 0 and not template_id:
-            # Create table structure on a blank slide
-            table_width = 550  # Width in points
-            table_height = 350  # Height in points
-            
-            # Create a 6x2 table for the shipping label
-            requests.append({
-                'createTable': {
-                    'rows': 6,
-                    'columns': 2,
-                    'elementProperties': {
-                        'pageObjectId': template_slide_id,
-                        'size': {
-                            'width': {'magnitude': table_width, 'unit': 'PT'},
-                            'height': {'magnitude': table_height, 'unit': 'PT'}
-                        },
-                        'transform': {
-                            'scaleX': 1,
-                            'scaleY': 1,
-                            'translateX': 50,
-                            'translateY': 50,
-                            'unit': 'PT'
-                        }
-                    }
+        # Add the date to the title placeholder
+        if new_date_slide_id:
+            title_text_request = {
+                'insertText': {
+                    'objectId': 'dateTitle',
+                    'insertionIndex': 0,
+                    'text': current_date
                 }
-            })
-        
-        # Get the updated slides to find the created table
-        if len(requests) > 0:
+            }
+            
             slides_service.presentations().batchUpdate(
                 presentationId=presentation_id,
-                body={'requests': requests}
+                body={'requests': [title_text_request]}
             ).execute()
-            
-            presentation = slides_service.presentations().get(
-                presentationId=presentation_id
-            ).execute()
-            slides = presentation.get('slides', [])
-            
-        # Find the table and cells on the template slide
-        template_table_id = None
-        cell_ids = []
         
-        if slides:
-            for element in slides[0].get('pageElements', []):
+        # Process each order - create new slides based on the template
+        insert_index = 1  # Start inserting after the date slide
+        
+        for order in order_details:
+            # Duplicate the template slide
+            duplicate_request = {
+                'duplicateObject': {
+                    'objectId': template_slide_id,
+                    'insertionIndex': insert_index
+                }
+            }
+            
+            duplicate_response = slides_service.presentations().batchUpdate(
+                presentationId=presentation_id,
+                body={'requests': [duplicate_request]}
+            ).execute()
+            
+            # Get the ID of the duplicated slide
+            new_slide_id = duplicate_response.get('replies', [{}])[0].get('duplicateObject', {}).get('objectId')
+            
+            # Get the elements of the new slide, particularly the table
+            slide = slides_service.presentations().pages().get(
+                presentationId=presentation_id,
+                pageObjectId=new_slide_id
+            ).execute()
+            
+            # Find the table in the new slide
+            table_id = None
+            cell_ids = []
+            
+            for element in slide.get('pageElements', []):
                 if 'table' in element:
-                    template_table_id = element.get('objectId')
+                    table_id = element.get('objectId')
                     
                     rows = element.get('table', {}).get('tableRows', [])
                     for row_idx, row in enumerate(rows):
@@ -172,30 +146,12 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
                                 'column': col_idx,
                                 'objectId': cell.get('objectId')
                             })
-        
-        # Create copy of template slide for each order
-        for i, order in enumerate(order_details):
-            # Determine if we need to duplicate the template or use it
-            if i == 0 and template_slide_id:
-                slide_id = template_slide_id
-            else:
-                # Duplicate the template slide
-                duplicate_response = slides_service.presentations().batchUpdate(
-                    presentationId=presentation_id,
-                    body={
-                        'requests': [{
-                            'duplicateObject': {
-                                'objectId': template_slide_id
-                            }
-                        }]
-                    }
-                ).execute()
-                
-                # Get the ID of the duplicated slide
-                slide_id = duplicate_response.get('replies', [{}])[0].get('duplicateObject', {}).get('objectId')
             
-            # Fill in the shipping label content
-            # Format data for the table cells
+            if not table_id:
+                print(f"Warning: No table found in slide for order {order.get('order_number', '')}")
+                continue
+            
+            # Prepare the content for each cell
             quantity = "2" if order.get('is_bundle', False) else "1"
             size = order.get('size', '')
             material = order.get('material', '')
@@ -209,53 +165,66 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
             # Combine address lines
             address1 = order.get('address1', '')
             address2 = order.get('address2', '')
-            address = f"{address1}\n{address2}" if address2 else address1
+            address = f"{address1}\n{address2}" if address2 and address2.strip() else address1
             
-            # Format for table cells
-            cell_content = [
-                ["To:", "From:"],
-                [f"Name: {order.get('order_number', '')} {order.get('name', '')}", "Company: Eczema Mitten Private Limited"],
-                [f"Contact: {order.get('phone', '')}", "Contact: +65 8889 5607"],
-                [f"Delivery Address: {address}", "Return Address: #04-23, Block 235, Choa Chu Kang Central"],
-                [f"Postal: {order.get('postal', '')}", "Postal: 680235"],
-                [f"Item: {quantity} {size_display} {material} Eczema Mitten", ""]
-            ]
+            # For the items cell (merged cell)
+            item_description = f"{quantity} {size_display} {material} Eczema Mitten"
             
-            # Apply text to each cell if we're using a template with a table
-            if cell_ids:
-                text_updates = []
+            # Update each cell in the table
+            text_updates = []
+            
+            for cell in cell_ids:
+                row = cell.get('row')
+                col = cell.get('column')
                 
-                for cell in cell_ids:
-                    row = cell.get('row')
-                    col = cell.get('column')
+                # Define the content based on row and column
+                content = ""
+                
+                # Left column (col=0)
+                if col == 0:
+                    if row == 0:  # Name field
+                        content = f"Name: #{order.get('order_number', '').replace('#', '')} {order.get('name', '')}"
+                    elif row == 1:  # Contact field
+                        content = f"Contact: {order.get('phone', '')}"
+                    elif row == 2:  # Delivery Address field
+                        content = f"Delivery Address: {address}"
+                    elif row == 3:  # Postal field
+                        content = f"Postal: {order.get('postal', '')}"
+                    elif row == 4:  # Item field (merged cell)
+                        content = f"Item: {item_description}"
+                
+                # Right column (col=1) - Company info is already in the template
+                
+                # Only update if we have content to set
+                if content:
+                    # Clear existing text in the cell
+                    text_updates.append({
+                        'deleteText': {
+                            'objectId': cell.get('objectId'),
+                            'textRange': {
+                                'type': 'ALL'
+                            }
+                        }
+                    })
                     
-                    if row < len(cell_content) and col < len(cell_content[row]):
-                        content = cell_content[row][col]
-                        
-                        # First, clear any existing text in the cell
-                        text_updates.append({
-                            'deleteText': {
-                                'objectId': cell.get('objectId'),
-                                'textRange': {
-                                    'type': 'ALL'
-                                }
-                            }
-                        })
-                        
-                        # Then insert the new text
-                        text_updates.append({
-                            'insertText': {
-                                'objectId': cell.get('objectId'),
-                                'insertionIndex': 0,
-                                'text': content
-                            }
-                        })
-                
-                if text_updates:
-                    slides_service.presentations().batchUpdate(
-                        presentationId=presentation_id,
-                        body={'requests': text_updates}
-                    ).execute()
+                    # Insert new text
+                    text_updates.append({
+                        'insertText': {
+                            'objectId': cell.get('objectId'),
+                            'insertionIndex': 0,
+                            'text': content
+                        }
+                    })
+            
+            # Apply all text updates
+            if text_updates:
+                slides_service.presentations().batchUpdate(
+                    presentationId=presentation_id,
+                    body={'requests': text_updates}
+                ).execute()
+            
+            # Increment insert index for next slide
+            insert_index += 1
         
         return presentation_url
         
