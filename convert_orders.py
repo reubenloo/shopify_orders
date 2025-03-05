@@ -363,10 +363,22 @@ def convert_shopify_to_singpost(shopify_file, output_file):
         template_url = os.getenv('SLIDES_TEMPLATE_URL')
         
         if credentials_path and os.path.exists(credentials_path):
-            template_id = get_template_id_from_url(template_url) if template_url else None
-            slides_url = create_shipping_slides(sg_order_details, credentials_path, template_id)
-            if slides_url:
-                summary += f"\n\nCreated Google Slides presentation: {slides_url}"
+            try:
+                template_id = get_template_id_from_url(template_url) if template_url else None
+                if template_id:
+                    slides_url = create_shipping_slides(sg_order_details, credentials_path, template_id)
+                    if slides_url:
+                        summary += f"\n\nCreated Google Slides presentation: {slides_url}"
+                    else:
+                        summary += "\n\nError: Could not create Google Slides. Check logs for details."
+                else:
+                    summary += "\n\nError: Could not parse template ID from URL."
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                summary += f"\n\nError creating Google Slides: {str(e)}"
+        else:
+            summary += "\n\nNo Google credentials available for Slides integration."
         
     return summary, None, slides_url  # Return summary, PDF path (None), and Slides URL
 

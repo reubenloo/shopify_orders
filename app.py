@@ -157,10 +157,14 @@ if uploaded_file:
                 
                 with col2:
                     if slides_url:
+                        st.success("Google Slides shipping labels generated!")
                         st.markdown(f"[Open Google Slides Shipping Labels]({slides_url})")
                     else:
                         if os.environ.get('GOOGLE_CREDENTIALS_PATH') and os.path.exists(os.environ.get('GOOGLE_CREDENTIALS_PATH')):
-                            st.info("No Google Slides generated. Check permissions.")
+                            if os.environ.get('SLIDES_TEMPLATE_URL'):
+                                st.warning("No Singapore orders to process or error generating slides. Check logs.")
+                            else:
+                                st.warning("No Google Slides template URL provided.")
                         else:
                             st.warning("Upload Google credentials to use Slides integration")
                             
