@@ -32,7 +32,9 @@ def setup_credentials_from_secrets():
         
         # If template URL is in secrets, use it
         if 'google_slides_template' in st.secrets and 'url' in st.secrets['google_slides_template']:
-            os.environ['SLIDES_TEMPLATE_URL'] = st.secrets['google_slides_template']['url']
+            template_url = st.secrets['google_slides_template']['url']
+            os.environ['SLIDES_TEMPLATE_URL'] = template_url
+            st.sidebar.success(f"Using template from secrets: {template_url}")
         
         return True
     return False

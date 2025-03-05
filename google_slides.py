@@ -4,9 +4,9 @@ from google.oauth2 import service_account
 from datetime import datetime
 import re
 
-def modify_shipping_slides(order_details, credentials_path, template_id=None):
+def create_shipping_slides(order_details, credentials_path, template_id=None):
     """
-    Modify an existing Google Slides presentation with shipping labels for orders
+    Create or update a Google Slides presentation with shipping labels for orders
     
     Args:
         order_details: List of dictionaries containing order information
@@ -28,31 +28,56 @@ def modify_shipping_slides(order_details, credentials_path, template_id=None):
         slides_service = build('slides', 'v1', credentials=credentials)
         drive_service = build('drive', 'v3', credentials=credentials)
         
-        # Create a new presentation or use template
-        presentation_id = None
-        presentation_url = None
-        
-        # Modified code block to use an existing presentation:
-        presentation_id = get_template_id_from_url(presentation_url)
-        presentation = slides_service.presentations().get(
-            presentationId=presentation_id
-        ).execute()
-
-        # Create a blank slide
-        slides_service.presentations().batchUpdate(
-            presentationId=presentation_id,
-            body={
-                'requests': [{
-                    'createSlide': {
-                        'slideLayoutReference': {
-                            'predefinedLayout': 'BLANK'
-                        }
-                    }
-                }]
-            }
-        ).execute()
+        # If template_id is provided, we'll directly modify that presentation
+        # instead of creating a new one
+        if template_id:
+            presentation_id = template_id
+            presentation_url = f"https://docs.google.com/presentation/d/{presentation_id}/edit"
             
-        presentation_url = f"https://docs.google.com/presentation/d/{presentation_id}/edit"
+            # Get the presentation details to check existing slides
+            presentation = slides_service.presentations().get(
+                presentationId=presentation_id
+            ).execute()
+            
+            # Check if template has at least one slide
+            if len(presentation.get('slides', [])) < 1:
+                # Create a blank slide if template is empty
+                slides_service.presentations().batchUpdate(
+                    presentationId=presentation_id,
+                    body={
+                        'requests': [{
+                            'createSlide': {
+                                'insertionIndex': 0,
+                                'slideLayoutReference': {
+                                    'predefinedLayout': 'BLANK'
+                                }
+                            }
+                        }]
+                    }
+                ).execute()
+        else:
+            # Create a new blank presentation if no template is provided
+            presentation = {
+                'title': f"Shipping Labels - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            }
+            presentation = slides_service.presentations().create(body=presentation).execute()
+            presentation_id = presentation.get('presentationId')
+            
+            # Create a blank slide
+            slides_service.presentations().batchUpdate(
+                presentationId=presentation_id,
+                body={
+                    'requests': [{
+                        'createSlide': {
+                            'slideLayoutReference': {
+                                'predefinedLayout': 'BLANK'
+                            }
+                        }
+                    }]
+                }
+            ).execute()
+            
+            presentation_url = f"https://docs.google.com/presentation/d/{presentation_id}/edit"
         
         # Get the current slides to determine deletion/updates
         presentation = slides_service.presentations().get(
@@ -63,20 +88,12 @@ def modify_shipping_slides(order_details, credentials_path, template_id=None):
         slides = presentation.get('slides', [])
         delete_requests = []
         
-        if template_id and len(slides) > 1:
-            # Keep the first slide if using a template, delete the rest
+        # Keep the first slide as a template, delete the rest
+        if len(slides) > 1:
             for i in range(1, len(slides)):
                 delete_requests.append({
                     'deleteObject': {
                         'objectId': slides[i].get('objectId')
-                    }
-                })
-        elif len(slides) > 0 and not template_id:
-            # Delete all slides if not using a template
-            for slide in slides:
-                delete_requests.append({
-                    'deleteObject': {
-                        'objectId': slide.get('objectId')
                     }
                 })
             
@@ -86,28 +103,13 @@ def modify_shipping_slides(order_details, credentials_path, template_id=None):
                 body={'requests': delete_requests}
             ).execute()
             
-            # If we deleted all slides, create a new blank one
-            if not template_id or len(slides) <= 1:
-                slides_service.presentations().batchUpdate(
-                    presentationId=presentation_id,
-                    body={
-                        'requests': [{
-                            'createSlide': {
-                                'slideLayoutReference': {
-                                    'predefinedLayout': 'BLANK'
-                                }
-                            }
-                        }]
-                    }
-                ).execute()
-                
         # Get updated list of slides
         presentation = slides_service.presentations().get(
             presentationId=presentation_id
         ).execute()
         slides = presentation.get('slides', [])
         
-        # Create slides from template
+        # Use the first slide as a template
         template_slide_id = slides[0].get('objectId') if slides else None
         
         # Process each order - either updating template or creating new slides
@@ -230,6 +232,17 @@ def modify_shipping_slides(order_details, credentials_path, template_id=None):
                     if row < len(cell_content) and col < len(cell_content[row]):
                         content = cell_content[row][col]
                         
+                        # First, clear any existing text in the cell
+                        text_updates.append({
+                            'deleteText': {
+                                'objectId': cell.get('objectId'),
+                                'textRange': {
+                                    'type': 'ALL'
+                                }
+                            }
+                        })
+                        
+                        # Then insert the new text
                         text_updates.append({
                             'insertText': {
                                 'objectId': cell.get('objectId'),
