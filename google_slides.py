@@ -396,6 +396,34 @@ def update_slide_with_placeholders(slides_service, presentation_id, slide_id, or
         else:
             size_display = size
             
+        # Format the phone number to consistent +65 format
+        phone = order.get('phone', '')
+        if phone:
+            # Remove any leading apostrophes
+            if phone.startswith("'"):
+                phone = phone[1:]
+            
+            # If it doesn't start with '+65', add it
+            if not phone.startswith('+65'):
+                # If it starts with a '6' or '65', remove it to avoid doubling the country code
+                if phone.startswith('65'):
+                    phone = phone[2:]
+                elif phone.startswith('6'):
+                    phone = phone[1:]
+                
+                # Add the +65 prefix
+                phone = f"+65 {phone}"
+            
+            # Format with space after +65 and between groups of digits
+            # First ensure there's a space after +65
+            if '+65' in phone and not phone.startswith('+65 '):
+                phone = phone.replace('+65', '+65 ')
+            
+            # If phone is just digits with no spaces, add a space between the 4th and 5th digits
+            if len(phone.replace('+65 ', '').replace(' ', '')) == 8:
+                digits = phone.replace('+65 ', '').replace(' ', '')
+                phone = f"+65 {digits[:4]} {digits[4:]}"
+            
         # Combine address lines
         address1 = order.get('address1', '')
         address2 = order.get('address2', '')
@@ -418,7 +446,7 @@ def update_slide_with_placeholders(slides_service, presentation_id, slide_id, or
             },
             {
                 'find': '#PHONE#',
-                'replace': order.get('phone', '')
+                'replace': phone
             },
             {
                 'find': '#ADDRESS#',
