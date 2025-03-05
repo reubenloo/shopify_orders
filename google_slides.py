@@ -161,9 +161,47 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
                 # Update the date on the new date slide
                 update_date_slide(slides_service, presentation_id, new_date_slide_id)
             
+            # Step 1b: Create a new template slide by duplicating the existing template slide
+            # and position it after the new date slide
+            print("Creating new template slide at position 1...")
+            
+            duplicate_template_request = {
+                'duplicateObject': {
+                    'objectId': template_slide_id
+                }
+            }
+            
+            template_response = slides_service.presentations().batchUpdate(
+                presentationId=presentation_id,
+                body={'requests': [duplicate_template_request]}
+            ).execute()
+            
+            new_template_slide_id = template_response.get('replies', [{}])[0].get('duplicateObject', {}).get('objectId')
+            if not new_template_slide_id:
+                print("WARNING: Could not get ID for the new template slide")
+            else:
+                print(f"Created new template slide with ID: {new_template_slide_id}")
+                
+                # Move the new template slide to position 1 (right after the date slide)
+                template_move_request = {
+                    'updateSlidesPosition': {
+                        'slideObjectIds': [new_template_slide_id],
+                        'insertionIndex': 1  # Put right after the date slide
+                    }
+                }
+                
+                slides_service.presentations().batchUpdate(
+                    presentationId=presentation_id,
+                    body={'requests': [template_move_request]}
+                ).execute()
+                print("Moved template slide to position 1")
+                
+                # Now use this new template slide as our actual template
+                template_slide_id = new_template_slide_id
+            
             # Step 2: Create order detail slides, one for each order
             print(f"Creating {len(order_details)} order slides...")
-            insert_index = 1  # Start inserting after the date slide
+            insert_index = 2  # Start inserting after the template slide (now at position 1)
             
             for i, order in enumerate(order_details):
                 print(f"Processing order {i+1}: {order.get('order_number', 'unknown')}")
@@ -187,7 +225,7 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
                     
                 print(f"Created new order slide with ID: {new_slide_id}")
                 
-                # Position this slide after the date slide and before other order slides
+                # Position this slide after the template slide and before other order slides
                 position_request = {
                     'updateSlidesPosition': {
                         'slideObjectIds': [new_slide_id],
@@ -363,6 +401,11 @@ def update_slide_with_placeholders(slides_service, presentation_id, slide_id, or
         address2 = order.get('address2', '')
         address = f"{address1}\n{address2}" if address2 and address2.strip() else address1
         
+        # Remove any leading apostrophe from postal code
+        postal_code = order.get('postal', '')
+        if postal_code and postal_code.startswith("'"):
+            postal_code = postal_code[1:]
+        
         # Create replacements for placeholders
         replacements = [
             {
@@ -383,7 +426,7 @@ def update_slide_with_placeholders(slides_service, presentation_id, slide_id, or
             },
             {
                 'find': '#POSTALCODE#',
-                'replace': order.get('postal', '')
+                'replace': postal_code
             },
             {
                 'find': '#QUANTITY#',
