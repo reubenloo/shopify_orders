@@ -1,7 +1,7 @@
 import pandas as pd
 import os
 from collections import Counter, defaultdict
-from google_slides import modify_shipping_slides
+from google_slides import create_shipping_slides, get_template_id_from_url
 
 def safe_str_slice(value, length):
     """Safely convert value to string and slice it, handling NaN values"""
@@ -363,7 +363,8 @@ def convert_shopify_to_singpost(shopify_file, output_file):
         template_url = os.getenv('SLIDES_TEMPLATE_URL')
         
         if credentials_path and os.path.exists(credentials_path):
-            slides_url = modify_shipping_slides(sg_order_details, credentials_path, template_id)
+            template_id = get_template_id_from_url(template_url) if template_url else None
+            slides_url = create_shipping_slides(sg_order_details, credentials_path, template_id)
             if slides_url:
                 summary += f"\n\nCreated Google Slides presentation: {slides_url}"
         
