@@ -558,7 +558,7 @@ with st.sidebar:
     template_url_from_secrets = False
     if hasattr(st, 'secrets') and 'google_slides_template' in st.secrets:
         template_url = st.secrets['google_slides_template']
-        if template_url and isinstance(template_url, str) and template_url.startswith("https://docs.google.com/presentation"):
+        if isinstance(template_url, str) and template_url.startswith("https://docs.google.com/presentation"):
             os.environ['SLIDES_TEMPLATE_URL'] = template_url
             st.success("Template URL loaded from Streamlit secrets!")
             template_url_from_secrets = True
@@ -634,7 +634,10 @@ if uploaded_file:
             debug_msg.append(f"credentials_path in session_state: {'credentials_path' in st.session_state}")
             if 'credentials_path' in st.session_state:
                 debug_msg.append(f"Session state path: {st.session_state.credentials_path}")
-                debug_msg.append(f"Path exists: {os.path.exists(st.session_state.credentials_path)}")
+                if st.session_state.credentials_path is not None:
+                    debug_msg.append(f"Path exists: {os.path.exists(st.session_state.credentials_path)}")
+                else:
+                    debug_msg.append("Path is None")
                 
             # Log to console
             print("\n".join(debug_msg))
