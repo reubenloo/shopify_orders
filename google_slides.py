@@ -4,9 +4,9 @@ from google.oauth2 import service_account
 from datetime import datetime
 import re
 
-def create_shipping_slides(order_details, credentials_path, template_id=None):
+def modify_shipping_slides(order_details, credentials_path, template_id=None):
     """
-    Create or update a Google Slides presentation with shipping labels for orders
+    Modify an existing Google Slides presentation with shipping labels for orders
     
     Args:
         order_details: List of dictionaries containing order information
@@ -32,57 +32,25 @@ def create_shipping_slides(order_details, credentials_path, template_id=None):
         presentation_id = None
         presentation_url = None
         
-        if template_id:
-            # Copy the template presentation
-            copy_title = f"Shipping Labels - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-            drive_response = drive_service.files().copy(
-                fileId=template_id,
-                body={"name": copy_title}
-            ).execute()
-            presentation_id = drive_response.get('id')
-            
-            # Get the presentation details
-            presentation = slides_service.presentations().get(
-                presentationId=presentation_id
-            ).execute()
-            
-            # Check if template has at least one slide
-            if len(presentation.get('slides', [])) < 1:
-                # Create a blank slide if template is empty
-                slides_service.presentations().batchUpdate(
-                    presentationId=presentation_id,
-                    body={
-                        'requests': [{
-                            'createSlide': {
-                                'insertionIndex': 0,
-                                'slideLayoutReference': {
-                                    'predefinedLayout': 'BLANK'
-                                }
-                            }
-                        }]
-                    }
-                ).execute()
-        else:
-            # Create a new blank presentation
-            presentation = {
-                'title': f"Shipping Labels - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-            }
-            presentation = slides_service.presentations().create(body=presentation).execute()
-            presentation_id = presentation.get('presentationId')
-            
-            # Create a blank slide
-            slides_service.presentations().batchUpdate(
-                presentationId=presentation_id,
-                body={
-                    'requests': [{
-                        'createSlide': {
-                            'slideLayoutReference': {
-                                'predefinedLayout': 'BLANK'
-                            }
+        # Modified code block to use an existing presentation:
+        presentation_id = get_template_id_from_url(presentation_url)
+        presentation = slides_service.presentations().get(
+            presentationId=presentation_id
+        ).execute()
+
+        # Create a blank slide
+        slides_service.presentations().batchUpdate(
+            presentationId=presentation_id,
+            body={
+                'requests': [{
+                    'createSlide': {
+                        'slideLayoutReference': {
+                            'predefinedLayout': 'BLANK'
                         }
-                    }]
-                }
-            ).execute()
+                    }
+                }]
+            }
+        ).execute()
             
         presentation_url = f"https://docs.google.com/presentation/d/{presentation_id}/edit"
         
