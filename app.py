@@ -107,15 +107,26 @@ with st.sidebar:
     3. For Singapore orders, it creates shipping labels in Google Slides
     """)
 
+# Initialize session state for conversion results
+if 'conversion_results' not in st.session_state:
+    st.session_state.conversion_results = None
+if 'last_uploaded_file' not in st.session_state:
+    st.session_state.last_uploaded_file = None
+
 # Main content area
 # File uploader for Shopify CSV
 uploaded_file = st.file_uploader("Upload Shopify orders_export.csv", type='csv')
 
 if uploaded_file:
+    # Check if a new file was uploaded - clear old results
+    if st.session_state.last_uploaded_file != uploaded_file.name:
+        st.session_state.conversion_results = None
+        st.session_state.last_uploaded_file = uploaded_file.name
+
     # Save the uploaded file
     with open("orders_export.csv", "wb") as f:
         f.write(uploaded_file.getvalue())
-    
+
     # Add a button to run the conversion
     if st.button("Convert to SingPost Format"):
         with st.spinner("Processing orders..."):
@@ -123,72 +134,86 @@ if uploaded_file:
             try:
                 result, intl_df, us_df, slides_url = convert_shopify_to_singpost('orders_export.csv', 'singpost_orders.csv')
 
-                # Display results
+                # Store results in session state
+                st.session_state.conversion_results = {
+                    'summary': result,
+                    'intl_df': intl_df,
+                    'us_df': us_df,
+                    'slides_url': slides_url
+                }
+
                 st.success("Conversion completed!")
 
-                # Create tabs for summary and data preview
-                tab1, tab2, tab3 = st.tabs(["Summary", "International Orders Preview", "US Orders Preview"])
-
-                with tab1:
-                    st.text_area("Conversion Summary", result, height=400)
-
-                with tab2:
-                    if intl_df is not None:
-                        st.subheader("International Orders (ex-SG, ex-US, ex-CA)")
-                        st.dataframe(intl_df)
-                    else:
-                        st.info("No international orders (ex-SG, ex-US, ex-CA)")
-
-                with tab3:
-                    if us_df is not None:
-                        st.subheader("US Orders")
-                        st.dataframe(us_df)
-                    else:
-                        st.info("No US orders")
-
-                # Download section
-                st.divider()
-                st.subheader("Download Results")
-
-                col1, col2, col3 = st.columns(3)
-
-                with col1:
-                    if os.path.exists("singpost_orders.csv"):
-                        with open("singpost_orders.csv", "rb") as file:
-                            st.download_button(
-                                label="📥 Download International CSV",
-                                data=file,
-                                file_name="singpost_international_orders.csv",
-                                mime="text/csv"
-                            )
-                    else:
-                        st.info("No international CSV")
-
-                with col2:
-                    if os.path.exists("singpost_orders_us.csv"):
-                        with open("singpost_orders_us.csv", "rb") as file:
-                            st.download_button(
-                                label="📥 Download US CSV",
-                                data=file,
-                                file_name="singpost_us_orders.csv",
-                                mime="text/csv"
-                            )
-                    else:
-                        st.info("No US CSV")
-
-                with col3:
-                    if slides_url:
-                        st.success("Google Slides labels created!")
-                        st.markdown(f"[Open Shipping Labels]({slides_url})")
-                    else:
-                        if os.environ.get('GOOGLE_CREDENTIALS_PATH') and os.path.exists(os.environ.get('GOOGLE_CREDENTIALS_PATH')):
-                            if os.environ.get('SLIDES_TEMPLATE_URL'):
-                                st.info("No Singapore orders or error generating slides")
-                            else:
-                                st.info("No Slides template URL")
-                        else:
-                            st.info("No Google credentials")
-                            
             except Exception as e:
                 st.error(f"Error processing orders: {str(e)}")
                 st.exception(e)
+                st.session_state.conversion_results = None
+
+# Display results if they exist in session state
+if st.session_state.conversion_results is not None:
+    results = st.session_state.conversion_results
+
+    # Create tabs for summary and data preview
+    tab1, tab2, tab3 = st.tabs(["Summary", "International Orders Preview", "US Orders Preview"])
+
+    with tab1:
+        st.text_area("Conversion Summary", results['summary'], height=400)
+
+    with tab2:
+        if results['intl_df'] is not None:
+            st.subheader("International Orders (ex-SG, ex-US, ex-CA)")
+            st.dataframe(results['intl_df'])
+        else:
+            st.info("No international orders (ex-SG, ex-US, ex-CA)")
+
+    with tab3:
+        if results['us_df'] is not None:
+            st.subheader("US Orders")
+            st.dataframe(results['us_df'])
+        else:
+            st.info("No US orders")
+
+    # Download section
+    st.divider()
+    st.subheader("Download Results")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        if os.path.exists("singpost_orders.csv"):
+            with open("singpost_orders.csv", "rb") as file:
+                st.download_button(
+                    label="📥 Download International CSV",
+                    data=file,
+                    file_name="singpost_international_orders.csv",
+                    mime="text/csv",
+                    key="download_intl"
+                )
+        else:
+            st.info("No international CSV")
+
+    with col2:
+        if os.path.exists("singpost_orders_us.csv"):
+            with open("singpost_orders_us.csv", "rb") as file:
+                st.download_button(
+                    label="📥 Download US CSV",
+                    data=file,
+                    file_name="singpost_us_orders.csv",
+                    mime="text/csv",
+                    key="download_us"
+                )
+        else:
+            st.info("No US CSV")
+
+    with col3:
+        if results['slides_url']:
+            st.success("Google Slides labels created!")
+            st.markdown(f"[Open Shipping Labels]({results['slides_url']})")
+        else:
+            if os.environ.get('GOOGLE_CREDENTIALS_PATH') and os.path.exists(os.environ.get('GOOGLE_CREDENTIALS_PATH')):
+                if os.environ.get('SLIDES_TEMPLATE_URL'):
+                    st.info("No Singapore orders or error generating slides")
+                else:
+                    st.info("No Slides template URL")
+            else:
+                st.info("No Google credentials")
