@@ -101,7 +101,9 @@ with st.sidebar:
     st.info("""
     **How this works:**
     1. Upload your Shopify export CSV
-    2. The app generates SingPost CSV for international orders
+    2. The app generates TWO SingPost CSV files:
+       - International orders (ex-SG, ex-US, ex-CA) in SGD
+       - US orders in USD with US-specific pricing
     3. For Singapore orders, it creates shipping labels in Google Slides
     """)
 
@@ -119,54 +121,73 @@ if uploaded_file:
         with st.spinner("Processing orders..."):
             # Run conversion
             try:
-                result, pdf_path, slides_url = convert_shopify_to_singpost('orders_export.csv', 'singpost_orders.csv')
-                
+                result, intl_df, us_df, slides_url = convert_shopify_to_singpost('orders_export.csv', 'singpost_orders.csv')
+
                 # Display results
                 st.success("Conversion completed!")
-                
+
                 # Create tabs for summary and data preview
-                tab1, tab2 = st.tabs(["Summary", "Data Preview"])
-                
+                tab1, tab2, tab3 = st.tabs(["Summary", "International Orders Preview", "US Orders Preview"])
+
                 with tab1:
                     st.text_area("Conversion Summary", result, height=400)
-                
+
                 with tab2:
-                    if os.path.exists("singpost_orders.csv"):
-                        df = pd.read_csv("singpost_orders.csv")
-                        st.dataframe(df)
+                    if intl_df is not None:
+                        st.subheader("International Orders (ex-SG, ex-US, ex-CA)")
+                        st.dataframe(intl_df)
                     else:
-                        st.info("No SingPost CSV was generated (no international orders)")
-                
+                        st.info("No international orders (ex-SG, ex-US, ex-CA)")
+
+                with tab3:
+                    if us_df is not None:
+                        st.subheader("US Orders")
+                        st.dataframe(us_df)
+                    else:
+                        st.info("No US orders")
+
                 # Download section
                 st.divider()
                 st.subheader("Download Results")
-                
-                col1, col2 = st.columns(2)
-                
+
+                col1, col2, col3 = st.columns(3)
+
                 with col1:
                     if os.path.exists("singpost_orders.csv"):
                         with open("singpost_orders.csv", "rb") as file:
                             st.download_button(
-                                label="Download SingPost CSV",
+                                label="📥 Download International CSV",
                                 data=file,
-                                file_name="singpost_orders.csv",
+                                file_name="singpost_international_orders.csv",
                                 mime="text/csv"
                             )
                     else:
-                        st.info("No SingPost CSV generated")
-                
+                        st.info("No international CSV")
+
                 with col2:
+                    if os.path.exists("singpost_orders_us.csv"):
+                        with open("singpost_orders_us.csv", "rb") as file:
+                            st.download_button(
+                                label="📥 Download US CSV",
+                                data=file,
+                                file_name="singpost_us_orders.csv",
+                                mime="text/csv"
+                            )
+                    else:
+                        st.info("No US CSV")
+
+                with col3:
                     if slides_url:
-                        st.success("Google Slides shipping labels generated!")
-                        st.markdown(f"[Open Google Slides Shipping Labels]({slides_url})")
+                        st.success("Google Slides labels created!")
+                        st.markdown(f"[Open Shipping Labels]({slides_url})")
                     else:
                         if os.environ.get('GOOGLE_CREDENTIALS_PATH') and os.path.exists(os.environ.get('GOOGLE_CREDENTIALS_PATH')):
                             if os.environ.get('SLIDES_TEMPLATE_URL'):
-                                st.warning("No Singapore orders to process or error generating slides. Check logs.")
+                                st.info("No Singapore orders or error generating slides")
                             else:
-                                st.warning("No Google Slides template URL provided.")
+                                st.info("No Slides template URL")
                         else:
-                            st.warning("Upload Google credentials to use Slides integration")
+                            st.info("No Google credentials")
                             
             except Exception as e:
                 st.error(f"Error processing orders: {str(e)}")
