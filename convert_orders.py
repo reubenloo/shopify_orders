@@ -119,10 +119,10 @@ def fetch_usd_prices_from_shopify(us_orders):
 
     # Get credentials from environment
     access_token = os.getenv('SHOPIFY_ACCESS_TOKEN')
-    store_url = os.getenv('SHOPIFY_STORE_URL', 'eczema-mittens.myshopify.com')
+    store_url = os.getenv('SHOPIFY_STORE_URL')
 
-    if not access_token:
-        raise Exception("Shopify API credentials not configured. Please add Shopify credentials to .streamlit/secrets.toml")
+    if not access_token or not store_url:
+        raise Exception("Shopify API credentials not configured. Please add Shopify credentials (access_token and store_url) to .streamlit/secrets.toml")
 
     usd_prices = {}
 
