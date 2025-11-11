@@ -188,7 +188,8 @@ def create_us_singpost_row(row, is_bundle, material, size, hs_code, usd_price):
     """
 
     # Calculate weights and dimensions
-    weight = 500 if is_bundle else 250  # grams
+    weight_grams = 500 if is_bundle else 250  # grams
+    weight_kg = weight_grams / 1000  # Convert to kg for US CSV format
     height = 4 if is_bundle else 2
 
     # Handle state/province
@@ -248,7 +249,7 @@ def create_us_singpost_row(row, is_bundle, material, size, hs_code, usd_price):
         'Item Type - Please type in either D (for document) or P (for package) - (Max 1 character) - *': 'P',
         'Category of shipment - Please type in either D (for document) M (for merchandise) S (for sample) or O (for others) (Max 1 character) - *': 'M',
         'If "Others", please describe (Max 50 characters)': '',
-        'Total Item physical weight (min 0.001 kg) - *': weight,
+        'Total Item physical weight (min 0.001 kg) - *': weight_kg,
         'Item Length (cm)': 20,
         'Item Width (cm)': 10,
         'Item Height (cm)': height,
@@ -256,7 +257,7 @@ def create_us_singpost_row(row, is_bundle, material, size, hs_code, usd_price):
         # 26-32: Item Content No. 1
         'Item Content No. 1 Description  (Max 50 characters) - *': simplified_description,
         'Item Content No. 1 Quantity': row['Lineitem quantity'],
-        'Item Content No. 1 Weight (min 0.001 kg)': weight,
+        'Item Content No. 1 Weight (min 0.001 kg)': weight_kg,
         'Item Content No. 1 Declared Currency (Only USD) *': 'USD',
         'Item Content No. 1 Declared value *': usd_price,
         'Item Content No. 1 HS tariff number (10 characters) *': hs_code,
