@@ -11,6 +11,24 @@ def safe_str_slice(value, length):
         return ''
     return str(value)[:length]
 
+def format_phone_number(phone):
+    """Format phone number to include + and - for readability"""
+    if pd.isna(phone):
+        return ''
+
+    # Remove all non-digit characters
+    digits = ''.join(filter(str.isdigit, str(phone)))
+
+    # If it's a US number (starts with 1 and has 11 digits)
+    if len(digits) == 11 and digits.startswith('1'):
+        return f"+{digits[0]} {digits[1:4]}-{digits[4:7]}-{digits[7:]}"
+    # If it's 10 digits, assume US and add country code
+    elif len(digits) == 10:
+        return f"+1 {digits[0:3]}-{digits[3:6]}-{digits[6:]}"
+    # Otherwise return as-is with just a +
+    else:
+        return f"+{digits}" if digits else ''
+
 def clean_shopify_data(df):
     """Clean Shopify export data by merging amended orders and removing incomplete orders"""
     # Extract order number from the Name column (removing the # symbol)
@@ -237,13 +255,13 @@ def create_us_singpost_row(row, is_bundle, material, size, hs_code, usd_price):
         'Send to state (Max 30 characters) (Please spell in full)': state,
         'Send to country (Max 2 characters) - * (Refer to Country List sheet)': safe_str_slice(row['Shipping Country'], 2),
         'Send to postcode (Max 10 characters)': safe_str_slice(str(row['Shipping Zip']), 10).replace("'", ""),
-        'Send to phone no. (Max 20 characters)': safe_str_slice(row['Shipping Phone'], 20),
+        'Send to phone no. (Max 20 characters)': safe_str_slice(format_phone_number(row['Shipping Phone']), 20),
         'Send to email address': row['Email'] if pd.notna(row['Email']) else '',
         'Issuing Country of IOSS Number (Country code 2 characters) - only required if sending to EU and IOSS Number is provided': '',
         'Receiver VAT/GST number (Max 50 characters)': '',
         'Recipient EORI ID': '',
         'Issuing Country of Recipient EORI ID (Country code 2 characters) - required if the EORI Number is provided': '',
-        'Sender Reference (Max 20 characters)': safe_str_slice(str(row['Id']), 20),
+        'Sender Reference (Max 20 characters)': safe_str_slice(order_number, 20),
 
         # 19-25: Package Info
         'Item Type - Please type in either D (for document) or P (for package) - (Max 1 character) - *': 'P',
@@ -458,7 +476,7 @@ def convert_shopify_to_singpost(shopify_file, output_file):
                     'Send to country (Max 2 characters) - *': safe_str_slice(row['Shipping Country'], 2),
                     'Send to postcode (Max 10 characters)': safe_str_slice(str(row['Shipping Zip']), 10).replace("'", ""),
                     'Sender VAT/GST number (Max 50 characters)': '',
-                    'Sender Reference (Max 20 characters)': safe_str_slice(str(row['Id']), 20),
+                    'Sender Reference (Max 20 characters)': safe_str_slice(row['Name'], 20),
                     'Type of article - Please type in either LL (for letter) or AS (for small packet) - (Max 2 characters) - *': 'AS',
                     'Size - Please type in either RG (for Regular), LG (for Large) or NS (for Non-standard) - (Max 2 characters) - *': 'NS',
                     'Category of Shipment- Please type in either D (for Document), G (for Gift), M (for Merchandise), S (for Sample) or O (for others) (Max 1 character) - *': 'M',
