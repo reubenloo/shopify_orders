@@ -1,5 +1,7 @@
 import pandas as pd
 import os
+import time
+import requests
 from collections import Counter, defaultdict
 from google_slides import create_shipping_slides, get_template_id_from_url
 
@@ -103,6 +105,198 @@ def parse_product_details(lineitem_name):
 
     return is_bundle, material, size
 
+def fetch_usd_prices_from_shopify(us_orders):
+    """
+    Fetch USD prices for US orders from Shopify API
+
+    Args:
+        us_orders: DataFrame with US orders
+
+    Returns:
+        dict: {order_number: usd_price}
+        Example: {'2689': 156.25, '2690': 75.00}
+    """
+
+    # Get credentials from environment
+    access_token = os.getenv('SHOPIFY_ACCESS_TOKEN')
+    store_url = os.getenv('SHOPIFY_STORE_URL')
+
+    if not access_token or not store_url:
+        raise Exception("Shopify API credentials not configured. Please add Shopify credentials (access_token and store_url) to .streamlit/secrets.toml")
+
+    usd_prices = {}
+
+    print(f"\nFetching USD prices from Shopify API for {len(us_orders)} US orders...")
+
+    for _, row in us_orders.iterrows():
+        # Extract order number from 'Name' field (e.g., '#2689' -> '2689')
+        order_number = row['Name'].replace('#', '').strip()
+
+        # Build API URL
+        url = f"https://{store_url}/admin/api/2024-01/orders.json"
+        params = {
+            'name': order_number,  # NOT '#2689', just '2689'
+            'status': 'any',
+            'fields': 'current_subtotal_price_set'
+        }
+        headers = {
+            'X-Shopify-Access-Token': access_token
+        }
+
+        # Call API with rate limiting
+        time.sleep(0.5)  # 2 requests/second = 0.5s between calls
+
+        try:
+            response = requests.get(url, params=params, headers=headers, timeout=10)
+            response.raise_for_status()
+
+            data = response.json()
+
+            if data.get('orders') and len(data['orders']) > 0:
+                order = data['orders'][0]
+                usd_amount = order['current_subtotal_price_set']['presentment_money']['amount']
+                usd_prices[order_number] = float(usd_amount)
+                print(f"✓ Order #{order_number}: USD ${usd_amount}")
+            else:
+                error_msg = f"Order #{row['Name']} not found in Shopify API. Please verify the order exists and try again."
+                raise Exception(error_msg)
+
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Error connecting to Shopify API for order #{row['Name']}: {str(e)}"
+            raise Exception(error_msg)
+        except KeyError as e:
+            error_msg = f"Unexpected API response format for order #{row['Name']}: {str(e)}"
+            raise Exception(error_msg)
+
+    print(f"✓ Successfully fetched USD prices for all {len(us_orders)} US orders\n")
+    return usd_prices
+
+def create_us_singpost_row(row, is_bundle, material, size, hs_code, usd_price):
+    """
+    Create SingPost row for US orders with 55-column ezy2ship template
+
+    Args:
+        row: Shopify order row
+        is_bundle: Boolean
+        material: 'Cotton' or 'Tencel'
+        size: Size string
+        hs_code: 10-digit HS code
+        usd_price: USD price from Shopify API (float)
+
+    Returns:
+        dict: 55-column row for US CSV
+    """
+
+    # Calculate weights and dimensions
+    weight_grams = 500 if is_bundle else 250  # grams
+    weight_kg = weight_grams / 1000  # Convert to kg for US CSV format
+    height = 4 if is_bundle else 2
+
+    # Handle state/province
+    if pd.notna(row['Shipping Province Name']):
+        state = str(row['Shipping Province Name'])[:30]
+    elif pd.notna(row['Shipping Province']):
+        state = str(row['Shipping Province'])[:30]
+    else:
+        state = ''
+
+    # Handle Address Line 2
+    address_line_2 = row['Shipping Address2'][:35] if pd.notna(row['Shipping Address2']) and str(row['Shipping Address2']).strip() != '' else 'NA'
+
+    # Create simplified product description
+    quantity_str = "2" if is_bundle else "1"
+
+    # Format size string
+    if "(100-110cm)" in size:
+        size_str = "(100cm)"
+    elif "(110-120cm)" in size:
+        size_str = "(110cm)"
+    elif "(120-130cm)" in size:
+        size_str = "(120cm)"
+    elif "(130-140cm)" in size:
+        size_str = "(130cm)"
+    else:
+        size_str = size.split(" ")[0] if " " in size else size
+
+    simplified_description = f"Eczema Bolero Shrug {quantity_str}{size_str} {material}"
+
+    # Extract order number for invoice field
+    order_number = row['Name']  # e.g., '#2689'
+
+    # Build the 55-column row in exact template order
+    us_row = {
+        # 1-18: Sender/Receiver Info
+        'Cost centre code (Max 40 characters)': '',
+        'Sender VAT/GST number (Max 50 characters)': '',
+        'Send to business name (Max 35 characters) - *': safe_str_slice(row['Shipping Name'], 35),
+        'Send to contact person (Max 35 characters)': safe_str_slice(row['Shipping Name'], 35),
+        'Send to address line 1 eg. Block no. (Max 35 characters) - *': safe_str_slice(row['Shipping Address1'], 35),
+        'Send to address line 2 eg. Street name and Unit no. (Max 35 characters)- *': address_line_2,
+        'Send to address line 3 eg. Building name (Max 35 Characters)': '',
+        'Send to town (Max 30 characters) (Please spell in full)': safe_str_slice(row['Shipping City'], 30),
+        'Send to state (Max 30 characters) (Please spell in full)': state,
+        'Send to country (Max 2 characters) - * (Refer to Country List sheet)': safe_str_slice(row['Shipping Country'], 2),
+        'Send to postcode (Max 10 characters)': safe_str_slice(str(row['Shipping Zip']), 10).replace("'", ""),
+        'Send to phone no. (Max 20 characters)': safe_str_slice(row['Shipping Phone'], 20) if pd.notna(row['Shipping Phone']) else '',
+        'Send to email address': row['Email'] if pd.notna(row['Email']) else '',
+        'Issuing Country of IOSS Number (Country code 2 characters) - only required if sending to EU and IOSS Number is provided': '',
+        'Receiver VAT/GST number (Max 50 characters)': '',
+        'Recipient EORI ID': '',
+        'Issuing Country of Recipient EORI ID (Country code 2 characters) - required if the EORI Number is provided': '',
+        'Sender Reference (Max 20 characters)': safe_str_slice(order_number, 20),
+
+        # 19-25: Package Info
+        'Item Type - Please type in either D (for document) or P (for package) - (Max 1 character) - *': 'P',
+        'Category of shipment - Please type in either D (for document) M (for merchandise) S (for sample) or O (for others) (Max 1 character) - *': 'M',
+        'If "Others", please describe (Max 50 characters)': '',
+        'Total Item physical weight (min 0.001 kg) - *': weight_kg,
+        'Item Length (cm)': 20,
+        'Item Width (cm)': 10,
+        'Item Height (cm)': height,
+
+        # 26-32: Item Content No. 1
+        'Item Content No. 1 Description  (Max 50 characters) - *': simplified_description,
+        'Item Content No. 1 Quantity': row['Lineitem quantity'],
+        'Item Content No. 1 Weight (min 0.001 kg)': weight_kg,
+        'Item Content No. 1 Declared Currency (Only USD) *': 'USD',
+        'Item Content No. 1 Declared value *': usd_price,
+        'Item Content No. 1 HS tariff number (10 characters) *': hs_code,
+        'Item Content No. 1 Country of origin (Max 2 characters) - * (Refer to Country List sheet)': 'SG',
+
+        # 33-39: Item Content No. 2 (BLANK)
+        'Item  Content No. 2 Description (Max 50 characters)': '',
+        'Item  Content No. 2 Quantity': '',
+        'Item Content No. 2 Weight (min 0.001 kg)': '',
+        'Item Content No. 2 Declared Currency *': '',
+        'Item content No. 2 Declared value': '',
+        'Item Content No. 2 HS tariff number (10 characters) *': '',
+        'Item Content No. 2 Country of origin(Max 2 characters) (Refer to Country List sheet)': '',
+
+        # 40-46: Item Content No. 3 (BLANK)
+        'Item  Content No. 3 Description (Max 50 characters)': '',
+        'Item  Content No. 3 Quantity': '',
+        'Item Content No. 3 Weight (min 0.001 kg)': '',
+        'Item Content No. 3 Declared Currency *': '',
+        'Item content No. 3 Declared value': '',
+        'Item Content No. 3 HS tariff number (10 characters) *': '',
+        'Item Content No. 3 Country of origin(Max 2 characters) (Refer to Country List sheet)': '',
+
+        # 47-51: Additional Info
+        'Enhanced Liability Amount (must be equal or lower than Declared value)': '',
+        'Invoice number': order_number,
+        'Certificate number': '',
+        'Export license number': '',
+        'Service code - Refer to Service List sheet (Max 20 characters)  - *': 'WWCCOM',
+
+        # 52-55: Receiver Details
+        'Receiver ID Type': '',
+        'Receiver ID Number (Max 50 characters)': '',
+        'Tax ID (Max 35 characters)': '',
+        'Product URL (Max 100 characters)': ''
+    }
+
+    return us_row
+
 def convert_shopify_to_singpost(shopify_file, output_file):
     # Check if input file exists
     if not os.path.exists(shopify_file):
@@ -114,6 +308,16 @@ def convert_shopify_to_singpost(shopify_file, output_file):
 
     # Filter orders by destination country
     intl_orders, sg_orders, us_orders, ca_orders = filter_international_orders(df)
+
+    # Fetch USD prices for US orders from Shopify API
+    us_usd_prices = {}
+    if len(us_orders) > 0:
+        try:
+            us_usd_prices = fetch_usd_prices_from_shopify(us_orders)
+        except Exception as e:
+            # Stop entire process and show error
+            error_msg = f"Error fetching USD prices from Shopify API:\n{str(e)}"
+            return error_msg, None, None, None
 
     # Create output dataframes for SingPost
     intl_singpost_data = []
@@ -169,58 +373,44 @@ def convert_shopify_to_singpost(shopify_file, output_file):
             
             details.append(detail)
 
-            # Create SingPost entries for international and US orders (separate CSVs)
-            if region_name in ["International", "US"]:
-                # Determine currency, pricing, and HS codes based on region
-                if region_name == "US":
-                    currency = 'USD'
-                    # US-specific pricing in USD
-                    if is_bundle:
-                        weight = 500
-                        height = 4
-                        if material == 'Cotton':
-                            declared_value = 120
-                        elif material == 'Tencel':
-                            declared_value = 240
-                        else:
-                            declared_value = 120  # Default
-                    else:
-                        weight = 250
-                        height = 2
-                        if material == 'Cotton':
-                            declared_value = 75
-                        elif material == 'Tencel':
-                            declared_value = 150
-                        else:
-                            declared_value = 75  # Default
+            # Create SingPost entries for US orders (NEW 55-column format)
+            if region_name == "US":
+                # Extract order number
+                order_num = row['Name'].replace('#', '').strip()
+                usd_price = us_usd_prices.get(order_num)
 
-                    # US-specific HS codes
-                    if material == 'Cotton':
-                        hs_code = '6110202020'
-                    elif material == 'Tencel':
-                        hs_code = '6110303020'
-                    else:
-                        hs_code = '6110202020'  # Default to cotton
+                # US-specific HS codes (10 digits)
+                if material == 'Cotton':
+                    hs_code = '6114200060'
+                elif material == 'Tencel':
+                    hs_code = '6114303070'
+                else:
+                    hs_code = '6114200060'  # Default to cotton
 
-                else:  # International
-                    currency = 'SGD'
-                    # International pricing in SGD
-                    if is_bundle:
-                        weight = 500
-                        declared_value = 40
-                        height = 4
-                    else:
-                        weight = 250
-                        declared_value = 20
-                        height = 2
+                # Create US-specific row with 55 columns
+                us_row = create_us_singpost_row(row, is_bundle, material, size, hs_code, usd_price)
+                us_singpost_data.append(us_row)
 
-                    # International HS codes
-                    if material == 'Cotton':
-                        hs_code = '611020'
-                    elif material == 'Tencel':
-                        hs_code = '611030'
-                    else:
-                        hs_code = '611020'  # Default to cotton
+            # Create SingPost entries for International orders (EXISTING format - UNCHANGED)
+            elif region_name == "International":
+                currency = 'SGD'
+                # International pricing in SGD
+                if is_bundle:
+                    weight = 500
+                    declared_value = 40
+                    height = 4
+                else:
+                    weight = 250
+                    declared_value = 20
+                    height = 2
+
+                # International HS codes (6 digits)
+                if material == 'Cotton':
+                    hs_code = '611420'
+                elif material == 'Tencel':
+                    hs_code = '611430'
+                else:
+                    hs_code = '611420'  # Default to cotton
 
                 # Handle state/province field
                 if pd.notna(row['Shipping Province Name']):
@@ -229,18 +419,18 @@ def convert_shopify_to_singpost(shopify_file, output_file):
                     state = str(row['Shipping Province'])[:30]
                 else:
                     state = ''
-                    
+
                 # Handle Address Line 2
                 address_line_2 = row['Shipping Address2'][:35] if pd.notna(row['Shipping Address2']) and str(row['Shipping Address2']).strip() != '' else 'NA'
-                
+
                 # Check for address truncation
                 if (pd.notna(row['Shipping Address1']) and len(str(row['Shipping Address1'])) > 35 or
                     pd.notna(row['Shipping Address2']) and len(str(row['Shipping Address2'])) > 35):
                     print(f"WARNING: Address for {row['Name']} was truncated")
-                
+
                 # Create simplified product description for SingPost
                 quantity_str = "2" if is_bundle else "1"
-                
+
                 # Format size string
                 if "(100-110cm)" in size:
                     size_str = "(100cm)"
@@ -253,22 +443,22 @@ def convert_shopify_to_singpost(shopify_file, output_file):
                 else:
                     # Just use first part of size (XS, S, M, L, XL)
                     size_str = size.split(" ")[0] if " " in size else size
-                
+
                 # Create simplified item description
-                simplified_description = f"Eczema mitten {quantity_str}{size_str} {material}"
+                simplified_description = f"Eczema Bolero Shrug {quantity_str}{size_str} {material}"
 
                 singpost_row = {
                     'Send to business name line 1 (Max 35 characters) - *': safe_str_slice(row['Shipping Name'], 35),
-                    'Send to business name line 2 (Max 35 characters)': '',
+                    'Send to business name line 2 (Max 35 characters)': safe_str_slice(row['Shipping Phone'], 35) if pd.notna(row['Shipping Phone']) else '',
                     'Send to address line 1 (Max 35 characters) - *': safe_str_slice(row['Shipping Address1'], 35),
                     'Send to address line 2  (Max 35 characters) - *': address_line_2,
-                    'Send to address line 3 (Max 35 characters)': '',
+                    'Send to address line 3 (Max 35 characters)': safe_str_slice(row['Email'], 35) if pd.notna(row['Email']) else '',
                     'Send to town (Max 30 characters) (Please spell in full)': safe_str_slice(row['Shipping City'], 30),
                     'Send to state (Max 30 characters) (Please spell in full)': state,
                     'Send to country (Max 2 characters) - *': safe_str_slice(row['Shipping Country'], 2),
                     'Send to postcode (Max 10 characters)': safe_str_slice(str(row['Shipping Zip']), 10).replace("'", ""),
                     'Sender VAT/GST number (Max 50 characters)': '',
-                    'Sender Reference (Max 20 characters)': safe_str_slice(str(row['Id']), 20),
+                    'Sender Reference (Max 20 characters)': safe_str_slice(row['Name'], 20),
                     'Type of article - Please type in either LL (for letter) or AS (for small packet) - (Max 2 characters) - *': 'AS',
                     'Size - Please type in either RG (for Regular), LG (for Large) or NS (for Non-standard) - (Max 2 characters) - *': 'NS',
                     'Category of Shipment- Please type in either D (for Document), G (for Gift), M (for Merchandise), S (for Sample) or O (for others) (Max 1 character) - *': 'M',
@@ -298,11 +488,7 @@ def convert_shopify_to_singpost(shopify_file, output_file):
                         f'Item content {i} Country of origin (Max 2 characters) - *': ''
                     })
 
-                # Append to the appropriate list
-                if region_name == "US":
-                    us_singpost_data.append(singpost_row)
-                else:  # International
-                    intl_singpost_data.append(singpost_row)
+                intl_singpost_data.append(singpost_row)
 
     # Create summary message
     summary = "ORDER DETAILS BY REGION:\n"
@@ -424,6 +610,13 @@ def convert_shopify_to_singpost(shopify_file, output_file):
         # Create US-specific output filename
         us_output_file = output_file.replace('.csv', '_us.csv')
         us_df = pd.DataFrame(us_singpost_data)
+
+        # Validate column count (should be exactly 55 columns for US template)
+        if len(us_df.columns) != 55:
+            error_msg = f"US CSV validation error: Expected 55 columns, got {len(us_df.columns)}"
+            print(f"ERROR: {error_msg}")
+            raise ValueError(error_msg)
+
         us_df.to_csv(us_output_file,
                      index=False,
                      sep=',',

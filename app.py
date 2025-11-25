@@ -17,27 +17,40 @@ st.write("Upload your Shopify order export CSV to convert it to SingPost ezy2shi
 
 # Function to handle credentials from secrets
 def setup_credentials_from_secrets():
+    credentials_loaded = False
+
+    # Load Google credentials
     if 'google_credentials' in st.secrets:
         # Create a temporary file for the credentials
         credentials_path = "google_credentials.json"
-        
+
         # Extract the credentials from secrets and write to file
         creds_dict = dict(st.secrets["google_credentials"])
-        
+
         # Write to a temporary file
         with open(credentials_path, "w") as f:
             json.dump(creds_dict, f)
-        
+
         os.environ['GOOGLE_CREDENTIALS_PATH'] = credentials_path
-        
+
         # If template URL is in secrets, use it
         if 'google_slides_template' in st.secrets and 'url' in st.secrets['google_slides_template']:
             template_url = st.secrets['google_slides_template']['url']
             os.environ['SLIDES_TEMPLATE_URL'] = template_url
             st.sidebar.success(f"Using template from secrets: {template_url}")
-        
-        return True
-    return False
+
+        credentials_loaded = True
+
+    # Load Shopify credentials
+    if 'shopify' in st.secrets:
+        os.environ['SHOPIFY_ACCESS_TOKEN'] = st.secrets['shopify']['access_token']
+        os.environ['SHOPIFY_STORE_URL'] = st.secrets['shopify']['store_url']
+        st.sidebar.success("✓ Shopify API credentials loaded")
+        credentials_loaded = True
+    else:
+        st.sidebar.warning("⚠️ Shopify API credentials not found - US orders will fail")
+
+    return credentials_loaded
 
 # Check for credentials in secrets first
 using_secrets = setup_credentials_from_secrets()
