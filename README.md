@@ -66,7 +66,7 @@ Orders are categorized by shipping destination:
 
 Extracts from `Lineitem name` field:
 
-**Format**: `Eczema Scratch Mitten - {Material} / {Type} / {Size}`
+**Format**: `Eczema Bolero Shrug - {Material} / {Type} / {Size}`
 
 **Extracted Data**:
 - **Material**: Cotton or Tencel (Premium)
@@ -99,8 +99,8 @@ Extracts from `Lineitem name` field:
 - Bundle: 500g, 4cm height
 
 **HS Tariff Codes**:
-- Cotton: `611020`
-- Tencel: `611030`
+- Cotton: `611420`
+- Tencel: `611430`
 
 **Service Details**:
 - Service Code: `IRAIRA`
@@ -121,8 +121,8 @@ Extracts from `Lineitem name` field:
 - Tencel Bundle: $240
 
 **HS Tariff Codes** (US-specific 10-digit):
-- Cotton: `6110202020` (assumes women's garment)
-- Tencel: `6110303020` (assumes women's garment)
+- Cotton: `6114200060` (assumes women's garment)
+- Tencel: `6114303070` (assumes women's garment)
 
 **Other Details**: Same as international (weight, service code, etc.) but currency is USD
 

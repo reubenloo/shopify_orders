@@ -218,7 +218,7 @@ def create_us_singpost_row(row, is_bundle, material, size, hs_code, usd_price):
     else:
         size_str = size.split(" ")[0] if " " in size else size
 
-    simplified_description = f"Eczema mitten {quantity_str}{size_str} {material}"
+    simplified_description = f"Eczema Bolero Shrug {quantity_str}{size_str} {material}"
 
     # Extract order number for invoice field
     order_number = row['Name']  # e.g., '#2689'
@@ -381,11 +381,11 @@ def convert_shopify_to_singpost(shopify_file, output_file):
 
                 # US-specific HS codes (10 digits)
                 if material == 'Cotton':
-                    hs_code = '6110202020'
+                    hs_code = '6114200060'
                 elif material == 'Tencel':
-                    hs_code = '6110303020'
+                    hs_code = '6114303070'
                 else:
-                    hs_code = '6110202020'  # Default to cotton
+                    hs_code = '6114200060'  # Default to cotton
 
                 # Create US-specific row with 55 columns
                 us_row = create_us_singpost_row(row, is_bundle, material, size, hs_code, usd_price)
@@ -406,11 +406,11 @@ def convert_shopify_to_singpost(shopify_file, output_file):
 
                 # International HS codes (6 digits)
                 if material == 'Cotton':
-                    hs_code = '611020'
+                    hs_code = '611420'
                 elif material == 'Tencel':
-                    hs_code = '611030'
+                    hs_code = '611430'
                 else:
-                    hs_code = '611020'  # Default to cotton
+                    hs_code = '611420'  # Default to cotton
 
                 # Handle state/province field
                 if pd.notna(row['Shipping Province Name']):
@@ -445,7 +445,7 @@ def convert_shopify_to_singpost(shopify_file, output_file):
                     size_str = size.split(" ")[0] if " " in size else size
 
                 # Create simplified item description
-                simplified_description = f"Eczema mitten {quantity_str}{size_str} {material}"
+                simplified_description = f"Eczema Bolero Shrug {quantity_str}{size_str} {material}"
 
                 singpost_row = {
                     'Send to business name line 1 (Max 35 characters) - *': safe_str_slice(row['Shipping Name'], 35),
