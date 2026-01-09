@@ -14,7 +14,7 @@ st.set_page_config(
 # Setup page
 st.title("Shopify to SingPost Converter")
 st.write("Upload your Shopify order export CSV to convert it to SingPost ezy2ship format")
-st.caption("v2.1.1 - retail-speedpost-worldwide-multiple (46 columns fix)")
+st.caption("v2.2.0 - retail-mail-international template with IRREPK service code")
 
 # Function to handle credentials from secrets
 def setup_credentials_from_secrets():
