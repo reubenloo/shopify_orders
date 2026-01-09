@@ -103,7 +103,7 @@ Extracts from `Lineitem name` field:
 - Tencel: `611430`
 
 **Service Details**:
-- Service Code: `IRAIRA`
+- Service Code: `IRREPK`
 - Category: Merchandise (M)
 - Type: Small packet (AS)
 - Size: Non-standard (NS)

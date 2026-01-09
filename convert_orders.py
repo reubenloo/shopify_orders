@@ -467,7 +467,7 @@ def convert_shopify_to_singpost(shopify_file, output_file):
                     'Item Length (cm)': 20,
                     'Item Width (cm)': 10,
                     'Item Height (cm)': height,
-                    'Service code - Refer to Service List sheet (Max 20 characters)  - *': 'IRAIRA',
+                    'Service code - Refer to Service List sheet (Max 20 characters)  - *': 'IRREPK',
                     'Currency type - for all item values (3 characters) -*': currency,
                     'Item content 1 description (Max 50 characters) - *': simplified_description,
                     'Item content 1 quantity': row['Lineitem quantity'],
