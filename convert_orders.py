@@ -635,7 +635,7 @@ def convert_shopify_to_singpost(shopify_file, output_file):
         intl_df.to_csv(output_file,
                        index=False,
                        sep=',',
-                       quoting=1,
+                       quoting=0,  # QUOTE_MINIMAL - match ezy2ship template format
                        quotechar='"',
                        escapechar='\\',
                        encoding='utf-8')
@@ -666,7 +666,7 @@ def convert_shopify_to_singpost(shopify_file, output_file):
         us_df.to_csv(us_output_file,
                      index=False,
                      sep=',',
-                     quoting=1,
+                     quoting=0,  # QUOTE_MINIMAL - match ezy2ship template format
                      quotechar='"',
                      escapechar='\\',
                      encoding='utf-8')
