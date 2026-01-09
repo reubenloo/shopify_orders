@@ -1,4 +1,5 @@
-# Version 2.0.0 - retail-speedpost-worldwide-multiple template (42 columns)
+# Version 2.1.0 - retail-speedpost-worldwide-multiple template (46 columns)
+# Fixed: Added 4 missing columns (IOSS/EORI fields + empty col 46) that XLSX template has but CSV template lacks
 import pandas as pd
 import os
 import time
@@ -236,10 +237,13 @@ def create_intl_singpost_row(row, is_bundle, material, size, hs_code, declared_v
         'Send to country (Max 2 characters) - * (Refer to Country List sheet)': safe_str_slice(row['Shipping Country'], 2),
         'Send to postcode (Max 10 characters)': safe_str_slice(str(row['Shipping Zip']), 10).replace("'", ""),
 
-        # 10-13: Contact and VAT Info
+        # 10-16: Contact, VAT/IOSS, and Reference Info
         'Send to phone no. (Max 20 characters)': safe_str_slice(row['Shipping Phone'], 20) if pd.notna(row['Shipping Phone']) else '',
         'Sender VAT/GST number (Max 50 characters) - Sender IOSS number for European Union (EU) destinations, or VAT/GST number for specific destination where applicable.': '',
+        'Issuing Country of IOSS Number': '',  # NEW - Column 12
         'Receiver VAT/GST number (Max 50 characters)': '',
+        'Recipient EORI ID': '',  # NEW - Column 14
+        'Issuing Country of Recipient EORI ID': '',  # NEW - Column 15
         'Sender Reference (Max 20 characters)': safe_str_slice(order_number, 20),
 
         # 14-15: Shipment Category
@@ -276,12 +280,13 @@ def create_intl_singpost_row(row, is_bundle, material, size, hs_code, declared_v
         'Item Content No. 3 HS tariff number (Max 6 characters)': '',
         'Item Content No. 3 Country of origin(Max 2 characters) (Refer to Country List sheet) \n': '',
 
-        # 38-42: Additional Info and Service
+        # 41-46: Additional Info and Service
         'Enhanced Liability Amount (must be equal or lower than Declared value)': '',
         'Invoice number': order_number,
         'Certificate number': '',
         'Export license number': '',
-        'Service code - Refer to Service List sheet (Max 20 characters)  - *': 'IRREPK'
+        'Service code - Refer to Service List sheet (Max 20 characters)  - *': 'IRREPK',
+        '': ''  # Column 46 - Empty column required by ezy2ship
     }
 
     return intl_row
