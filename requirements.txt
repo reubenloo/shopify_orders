@@ -6,4 +6,4 @@ google-api-python-client>=2.108.0
 google-auth-httplib2>=0.1.1
 google-auth-oauthlib>=1.1.0
 pytz>=2023.3
-# v2.0.2 - Add CRLF line endings for ezy2ship compatibility
+# v2.0.3 - Fix NaN values output as empty string instead of "nan"

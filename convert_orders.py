@@ -639,6 +639,7 @@ def convert_shopify_to_singpost(shopify_file, output_file):
                        quotechar='"',
                        escapechar='\\',
                        lineterminator='\r\n',  # CRLF line endings for ezy2ship compatibility
+                       na_rep='',  # Empty string for NaN values (not "nan")
                        encoding='utf-8')
 
         # Validate required fields
@@ -671,6 +672,7 @@ def convert_shopify_to_singpost(shopify_file, output_file):
                      quotechar='"',
                      escapechar='\\',
                      lineterminator='\r\n',  # CRLF line endings for ezy2ship compatibility
+                     na_rep='',  # Empty string for NaN values (not "nan")
                      encoding='utf-8')
 
         # Validate required fields
