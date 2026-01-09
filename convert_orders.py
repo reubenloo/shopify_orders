@@ -631,9 +631,10 @@ def convert_shopify_to_singpost(shopify_file, output_file):
     if intl_singpost_data:
         intl_df = pd.DataFrame(intl_singpost_data)
 
-        # Validate column count (should be exactly 42 columns for retail-speedpost-worldwide-multiple template)
-        if len(intl_df.columns) != 42:
-            error_msg = f"International CSV validation error: Expected 42 columns, got {len(intl_df.columns)}"
+        # Validate column count (should be exactly 46 columns for retail-speedpost-worldwide-multiple template)
+        # Note: CSV template from ezy2ship has 42 cols but XLSX template has 46 - system expects 46
+        if len(intl_df.columns) != 46:
+            error_msg = f"International CSV validation error: Expected 46 columns, got {len(intl_df.columns)}"
             print(f"ERROR: {error_msg}")
             raise ValueError(error_msg)
 
