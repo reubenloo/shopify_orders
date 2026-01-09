@@ -102,11 +102,11 @@ Extracts from `Lineitem name` field:
 - Cotton: `611420`
 - Tencel: `611430`
 
-**Service Details**:
-- Service Code: `IRREPK`
+**Service Details** (retail-speedpost-worldwide-multiple template):
+- Service Code: `IRREPK` (Speedpost Saver International - Retail)
+- Template: retail-speedpost-worldwide-multiple (42 columns)
 - Category: Merchandise (M)
-- Type: Small packet (AS)
-- Size: Non-standard (NS)
+- Weight: 0.25kg (single) or 0.5kg (bundle)
 - Dimensions: 20cm × 10cm × (2cm or 4cm)
 - Country of Origin: SG
 
@@ -316,34 +316,37 @@ The codebase can be safely made public because:
 
 ### Wrong Currency in CSV
 
-- US orders: Should see `USD` in currency field
-- International: Should see `SGD` in currency field
+- US orders: Should see `USD` in declared currency field
+- International: Uses SGD (no separate currency field in retail-speedpost-worldwide-multiple template)
 - Verify `Shipping Country` column in Shopify export
 
 ## Maintenance Notes for Future AI
 
 ### When Pricing Changes:
 
-Edit `convert_orders.py` lines:
-- International: ~214-215 (SGD pricing)
-- US: ~181-195 (USD pricing by material)
+Edit `convert_orders.py`:
+- International: Search for `declared_value = 40 if is_bundle else 20` (~line 512)
+- US: USD prices come from Shopify API via `fetch_usd_prices_from_shopify()`
 
 ### When Adding New Countries to US CSV:
 
-Edit `convert_orders.py` line ~116:
-```python
-us_orders = df[df['Shipping Country'].isin(['US', 'CA'])].copy()
-```
+Edit `convert_orders.py` - search for `'Shipping Country'] == 'US'` in `filter_international_orders()`
 
 ### When HS Codes Change:
 
-Edit `convert_orders.py` lines:
-- International: ~218-223 (6-digit codes)
-- US: ~198-203 (10-digit codes)
+Edit `convert_orders.py`:
+- International: Search for `hs_code = '611420'` (~lines 514-520)
+- US: Search for `hs_code = '6114200060'` (~lines 498-503)
 
 ### When Adding New Sizes:
 
-Edit `convert_orders.py` lines ~89-109 (size parsing logic)
+Edit `convert_orders.py` function `parse_product_details()` (~lines 69-106)
+
+### When Service Codes Change:
+
+Edit `convert_orders.py`:
+- International: In `create_intl_singpost_row()`, search for `'Service code'` key
+- US: In `create_us_singpost_row()`, search for `'Service code'` key
 
 ## License
 

@@ -171,6 +171,121 @@ def fetch_usd_prices_from_shopify(us_orders):
     print(f"✓ Successfully fetched USD prices for all {len(us_orders)} US orders\n")
     return usd_prices
 
+def create_intl_singpost_row(row, is_bundle, material, size, hs_code, declared_value):
+    """
+    Create SingPost row for International orders with 42-column retail-speedpost-worldwide-multiple template
+
+    Args:
+        row: Shopify order row
+        is_bundle: Boolean
+        material: 'Cotton' or 'Tencel'
+        size: Size string
+        hs_code: 6-digit HS code
+        declared_value: SGD value (20 for single, 40 for bundle)
+
+    Returns:
+        dict: 42-column row for International CSV
+    """
+
+    # Calculate weights (in kg) and dimensions
+    weight_kg = 0.5 if is_bundle else 0.25  # 500g or 250g in kg
+    height = 4 if is_bundle else 2
+
+    # Handle state/province
+    if pd.notna(row['Shipping Province Name']):
+        state = str(row['Shipping Province Name'])[:30]
+    elif pd.notna(row['Shipping Province']):
+        state = str(row['Shipping Province'])[:30]
+    else:
+        state = ''
+
+    # Handle Address Line 2
+    address_line_2 = row['Shipping Address2'][:35] if pd.notna(row['Shipping Address2']) and str(row['Shipping Address2']).strip() != '' else 'NA'
+
+    # Create simplified product description
+    quantity_str = "2" if is_bundle else "1"
+
+    # Format size string
+    if "(100-110cm)" in size:
+        size_str = "(100cm)"
+    elif "(110-120cm)" in size:
+        size_str = "(110cm)"
+    elif "(120-130cm)" in size:
+        size_str = "(120cm)"
+    elif "(130-140cm)" in size:
+        size_str = "(130cm)"
+    else:
+        size_str = size.split(" ")[0] if " " in size else size
+
+    simplified_description = f"Eczema Bolero Shrug {quantity_str}{size_str} {material}"
+
+    # Extract order number for reference fields
+    order_number = row['Name']  # e.g., '#2689'
+
+    # Build the 42-column row in exact template order (retail-speedpost-worldwide-multiple)
+    intl_row = {
+        # 1-9: Recipient Address
+        'Send to business name (Max 35 characters) - *': safe_str_slice(row['Shipping Name'], 35),
+        'Send to contact person (Max 35 characters) ': safe_str_slice(row['Shipping Name'], 35),
+        'Send to address line 1 eg. Block no. (Max 35 characters) - *': safe_str_slice(row['Shipping Address1'], 35),
+        'Send to address line 2 eg. Street name and Unit no. (Max 35 characters)- *': address_line_2,
+        'Send to address line 3 eg. Building name (Max 35 Characters)': '',
+        'Send to town (Max 30 characters) (Please spell in full)': safe_str_slice(row['Shipping City'], 30),
+        'Send to state (Max 30 characters) (Please spell in full)': state,
+        'Send to country (Max 2 characters) - * (Refer to Country List sheet)': safe_str_slice(row['Shipping Country'], 2),
+        'Send to postcode (Max 10 characters)': safe_str_slice(str(row['Shipping Zip']), 10).replace("'", ""),
+
+        # 10-13: Contact and VAT Info
+        'Send to phone no. (Max 20 characters)': safe_str_slice(row['Shipping Phone'], 20) if pd.notna(row['Shipping Phone']) else '',
+        'Sender VAT/GST number (Max 50 characters) - Sender IOSS number for European Union (EU) destinations, or VAT/GST number for specific destination where applicable.': '',
+        'Receiver VAT/GST number (Max 50 characters)': '',
+        'Sender Reference (Max 20 characters)': safe_str_slice(order_number, 20),
+
+        # 14-15: Shipment Category
+        'Category of shipment - Please type in either D (for document) M (for merchandise) S (for sample) or O (for others) (Max 1 character) - *': 'M',
+        'If "Others", please describe (Max 50 characters)': '',
+
+        # 16-19: Package Dimensions
+        'Total Item physical weight (min 0.001 kg) - *': weight_kg,
+        'Item Length (cm)': 20,
+        'Item Width (cm)': 10,
+        'Item Height (cm)': height,
+
+        # 20-25: Item Content No. 1
+        ' Item Content No. 1 Description  (Max 50 characters) - *': simplified_description,
+        'Item Content No. 1 Quantity - *': row['Lineitem quantity'],
+        'Item Content No. 1 Weight (min 0.001 kg) - *': weight_kg,
+        ' Item Content No. 1 Declared value (SGD)': declared_value,
+        'Item Content No. 1 HS tariff number (Max 6 characters)': hs_code,
+        'Item Content No. 1 Country of origin (Max 2 characters) - * (Refer to Country List sheet) ': 'SG',
+
+        # 26-31: Item Content No. 2 (BLANK)
+        'Item  Content No. 2 Description (Max 50 characters) ': '',
+        'Item  Content No. 2 Quantity - *': '',
+        'Item  Content No. 2 Weight (min 0.001 kg) - *': '',
+        'Item  Content No. 2 Declared Value (SGD)': '',
+        'Item Content No. 2 HS tariff number (Max 6 characters)': '',
+        'Item Content No. 2 Country of origin(Max 2 characters) (Refer to Country List sheet) \n': '',
+
+        # 32-37: Item Content No. 3 (BLANK)
+        'Item  Content No. 3 Description (Max 50 characters) ': '',
+        'Item  Content No. 3 Quantity - *': '',
+        'Item  Content No. 3 Weight (min 0.001 kg) - *': '',
+        'Item  Content No. 3 Declared Value (SGD)': '',
+        'Item Content No. 3 HS tariff number (Max 6 characters)': '',
+        'Item Content No. 3 Country of origin(Max 2 characters) (Refer to Country List sheet) \n': '',
+
+        # 38-42: Additional Info and Service
+        'Enhanced Liability Amount (must be equal or lower than Declared value)': '',
+        'Invoice number': order_number,
+        'Certificate number': '',
+        'Export license number': '',
+        'Service code - Refer to Service List sheet (Max 20 characters)  - *': 'IRREPK'
+    }
+
+    return intl_row
+
+
 def create_us_singpost_row(row, is_bundle, material, size, hs_code, usd_price):
     """
     Create SingPost row for US orders with 55-column ezy2ship template
@@ -391,18 +506,10 @@ def convert_shopify_to_singpost(shopify_file, output_file):
                 us_row = create_us_singpost_row(row, is_bundle, material, size, hs_code, usd_price)
                 us_singpost_data.append(us_row)
 
-            # Create SingPost entries for International orders (EXISTING format - UNCHANGED)
+            # Create SingPost entries for International orders (retail-speedpost-worldwide-multiple template)
             elif region_name == "International":
-                currency = 'SGD'
                 # International pricing in SGD
-                if is_bundle:
-                    weight = 500
-                    declared_value = 40
-                    height = 4
-                else:
-                    weight = 250
-                    declared_value = 20
-                    height = 2
+                declared_value = 40 if is_bundle else 20
 
                 # International HS codes (6 digits)
                 if material == 'Cotton':
@@ -412,83 +519,14 @@ def convert_shopify_to_singpost(shopify_file, output_file):
                 else:
                     hs_code = '611420'  # Default to cotton
 
-                # Handle state/province field
-                if pd.notna(row['Shipping Province Name']):
-                    state = str(row['Shipping Province Name'])[:30]
-                elif pd.notna(row['Shipping Province']):
-                    state = str(row['Shipping Province'])[:30]
-                else:
-                    state = ''
-
-                # Handle Address Line 2
-                address_line_2 = row['Shipping Address2'][:35] if pd.notna(row['Shipping Address2']) and str(row['Shipping Address2']).strip() != '' else 'NA'
-
                 # Check for address truncation
                 if (pd.notna(row['Shipping Address1']) and len(str(row['Shipping Address1'])) > 35 or
                     pd.notna(row['Shipping Address2']) and len(str(row['Shipping Address2'])) > 35):
                     print(f"WARNING: Address for {row['Name']} was truncated")
 
-                # Create simplified product description for SingPost
-                quantity_str = "2" if is_bundle else "1"
-
-                # Format size string
-                if "(100-110cm)" in size:
-                    size_str = "(100cm)"
-                elif "(110-120cm)" in size:
-                    size_str = "(110cm)"
-                elif "(120-130cm)" in size:
-                    size_str = "(120cm)"
-                elif "(130-140cm)" in size:
-                    size_str = "(130cm)"
-                else:
-                    # Just use first part of size (XS, S, M, L, XL)
-                    size_str = size.split(" ")[0] if " " in size else size
-
-                # Create simplified item description
-                simplified_description = f"Eczema Bolero Shrug {quantity_str}{size_str} {material}"
-
-                singpost_row = {
-                    'Send to business name line 1 (Max 35 characters) - *': safe_str_slice(row['Shipping Name'], 35),
-                    'Send to business name line 2 (Max 35 characters)': safe_str_slice(row['Shipping Phone'], 35) if pd.notna(row['Shipping Phone']) else '',
-                    'Send to address line 1 (Max 35 characters) - *': safe_str_slice(row['Shipping Address1'], 35),
-                    'Send to address line 2  (Max 35 characters) - *': address_line_2,
-                    'Send to address line 3 (Max 35 characters)': safe_str_slice(row['Email'], 35) if pd.notna(row['Email']) else '',
-                    'Send to town (Max 30 characters) (Please spell in full)': safe_str_slice(row['Shipping City'], 30),
-                    'Send to state (Max 30 characters) (Please spell in full)': state,
-                    'Send to country (Max 2 characters) - *': safe_str_slice(row['Shipping Country'], 2),
-                    'Send to postcode (Max 10 characters)': safe_str_slice(str(row['Shipping Zip']), 10).replace("'", ""),
-                    'Sender VAT/GST number (Max 50 characters)': '',
-                    'Sender Reference (Max 20 characters)': safe_str_slice(row['Name'], 20),
-                    'Type of article - Please type in either LL (for letter) or AS (for small packet) - (Max 2 characters) - *': 'AS',
-                    'Size - Please type in either RG (for Regular), LG (for Large) or NS (for Non-standard) - (Max 2 characters) - *': 'NS',
-                    'Category of Shipment- Please type in either D (for Document), G (for Gift), M (for Merchandise), S (for Sample) or O (for others) (Max 1 character) - *': 'M',
-                    'If "Other", please describe (Max 50 characters)': '',
-                    'Total Physical weight (min 1 gm) - *': weight,
-                    'Item Length (cm)': 20,
-                    'Item Width (cm)': 10,
-                    'Item Height (cm)': height,
-                    'Service code - Refer to Service List sheet (Max 20 characters)  - *': 'IRREPK',
-                    'Currency type - for all item values (3 characters) -*': currency,
-                    'Item content 1 description (Max 50 characters) - *': simplified_description,
-                    'Item content 1 quantity': row['Lineitem quantity'],
-                    'Total content 1 weight (min 1 gm)': weight,
-                    'Item content 1 total value (in declared currency type)': declared_value,
-                    'Item content 1 HS tariff number (Max 6 characters)': hs_code,
-                    'Item content 1 Country of origin (Max 2 characters) - *': 'SG'
-                }
-
-                # Add empty values for content 2 and 3
-                for i in [2, 3]:
-                    singpost_row.update({
-                        f'Item content {i} description (Max 50 characters) - *': '',
-                        f'Item content {i} quantity': '',
-                        f'Total content {i} weight (min 1 gm)': '',
-                        f'Item content {i} total value (in declared currency type)': '',
-                        f'Item content {i} HS tariff number (Max 6 characters)': '',
-                        f'Item content {i} Country of origin (Max 2 characters) - *': ''
-                    })
-
-                intl_singpost_data.append(singpost_row)
+                # Create international row with 42-column speedpost template
+                intl_row = create_intl_singpost_row(row, is_bundle, material, size, hs_code, declared_value)
+                intl_singpost_data.append(intl_row)
 
     # Create summary message
     summary = "ORDER DETAILS BY REGION:\n"
@@ -586,6 +624,13 @@ def convert_shopify_to_singpost(shopify_file, output_file):
     # Create International CSV if there are international orders
     if intl_singpost_data:
         intl_df = pd.DataFrame(intl_singpost_data)
+
+        # Validate column count (should be exactly 42 columns for retail-speedpost-worldwide-multiple template)
+        if len(intl_df.columns) != 42:
+            error_msg = f"International CSV validation error: Expected 42 columns, got {len(intl_df.columns)}"
+            print(f"ERROR: {error_msg}")
+            raise ValueError(error_msg)
+
         intl_df.to_csv(output_file,
                        index=False,
                        sep=',',
