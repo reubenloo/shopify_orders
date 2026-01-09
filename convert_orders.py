@@ -638,6 +638,7 @@ def convert_shopify_to_singpost(shopify_file, output_file):
                        quoting=0,  # QUOTE_MINIMAL - match ezy2ship template format
                        quotechar='"',
                        escapechar='\\',
+                       lineterminator='\r\n',  # CRLF line endings for ezy2ship compatibility
                        encoding='utf-8')
 
         # Validate required fields
@@ -669,6 +670,7 @@ def convert_shopify_to_singpost(shopify_file, output_file):
                      quoting=0,  # QUOTE_MINIMAL - match ezy2ship template format
                      quotechar='"',
                      escapechar='\\',
+                     lineterminator='\r\n',  # CRLF line endings for ezy2ship compatibility
                      encoding='utf-8')
 
         # Validate required fields
