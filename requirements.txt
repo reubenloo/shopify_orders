@@ -6,4 +6,4 @@ google-api-python-client>=2.108.0
 google-auth-httplib2>=0.1.1
 google-auth-oauthlib>=1.1.0
 pytz>=2023.3
-# v2.1.0 - Add 4 missing columns (IOSS/EORI + empty col 46) to match XLSX template
+# v2.1.1 - Add 4 missing columns (IOSS/EORI + empty col 46) + fix validation check (42->46)
